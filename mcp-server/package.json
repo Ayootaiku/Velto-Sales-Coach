@@ -1,0 +1,18 @@
+{
+  "name": "supabase-mcp-server",
+  "version": "1.0.0",
+  "description": "MCP server for Supabase READ-ONLY access",
+  "type": "module",
+  "main": "supabase-server.ts",
+  "scripts": {
+    "start": "tsx supabase-server.ts",
+    "dev": "tsx watch supabase-server.ts"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.0.4",
+    "@supabase/supabase-js": "^2.48.1"
+  },
+  "devDependencies": {
+    "tsx": "^4.19.2"
+  }
+}
