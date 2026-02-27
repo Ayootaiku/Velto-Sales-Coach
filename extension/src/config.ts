@@ -1,6 +1,3 @@
-// UPDATE THESE after Railway deploys. Run `railway domain` to get the URL.
-// API_BASE_URL = your Next.js service domain on Railway
-// WSS_URL = your WebSocket STT service domain on Railway
 export const API_BASE_URL = "https://velto-sales-coach-production.up.railway.app";
 export const WSS_URL = "wss://velto-sales-coach-production.up.railway.app";
 

@@ -6,7 +6,7 @@
   "scripts": {
     "dev": "node scripts/dev.js",
     "build": "next build",
-    "start": "next start",
+    "start": "node server/combined-server.js",
     "lint": "eslint .",
     "ws-server": "node server/websocket-stt-server.js",
     "dev:next": "next dev",
