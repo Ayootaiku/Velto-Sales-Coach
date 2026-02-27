@@ -983,24 +983,12 @@ export function SalesCoachOverlay() {
 
   const handleStartCoaching = useCallback(async (mode: 'dual' | 'diarized' = 'dual') => {
     const diarize = mode === 'diarized'
-    setIsDiarized(diarize)
 
-    addLog(`Starting session (${mode.toUpperCase()} mode)...`)
-    resetTrace() // Reset trace at start
-    setStatus("listening") // Immediate transition
-
-    setCallTime(0)
-    setCards([])
-    transcriptTurnsRef.current = []
-
+    // In-room: request microphone FIRST (before any setState/addLog) so extension side panel gets the permission prompt
+    let micStreamForDiarized: MediaStream | null = null
     if (diarize) {
-      addLog("🚀 INITIALIZING IN-ROOM CAPTURE (Diarization V1.2)...")
-      setSalespersonTag(null)
-      setManualSpeaker('salesperson')
       try {
-        // Request microphone immediately from user gesture (click) so the browser shows the permission prompt
-        addLog("Requesting microphone access...")
-        const micStream = await navigator.mediaDevices.getUserMedia({
+        micStreamForDiarized = await navigator.mediaDevices.getUserMedia({
           audio: {
             echoCancellation: true,
             noiseSuppression: true,
@@ -1009,19 +997,41 @@ export function SalesCoachOverlay() {
             sampleRate: 16000
           }
         })
+      } catch (e: any) {
+        setStatus("ready")
+        setIsDiarized(false)
+        addLog(`❌ Microphone denied: ${e?.message || e}`)
+        if (e?.name === 'NotAllowedError' || e?.message?.includes('Permission dismissed')) {
+          addLog("Click In room again and choose Allow when the browser asks for microphone.")
+        }
+        return
+      }
+    }
+
+    setIsDiarized(diarize)
+    addLog(`Starting session (${mode.toUpperCase()} mode)...`)
+    resetTrace() // Reset trace at start
+    setStatus("listening") // Immediate transition
+
+    setCallTime(0)
+    setCards([])
+    transcriptTurnsRef.current = []
+
+    if (diarize && micStreamForDiarized) {
+      addLog("🚀 INITIALIZING IN-ROOM CAPTURE (Diarization V1.2)...")
+      setSalespersonTag(null)
+      setManualSpeaker('salesperson')
+      try {
         updateTrace({ A: true, turnId: 0 })
-        // Use 5.0x gain boost for diarization (enhanced room capture)
-        await salespersonStream.startStream('salesperson', micStream, true)
+        await salespersonStream.startStream('salesperson', micStreamForDiarized, true)
         addLog("✅ WEBSOCKET CONNECTED - Port 3002")
         addLog("🎙️ CAPTURE ACTIVE: Use the buttons to switch speakers.")
       } catch (e: any) {
         addLog(`❌ Diarization failed: ${e.message || e}`)
-        if (e?.name === 'NotAllowedError' || e?.message?.includes('Permission dismissed')) {
-          addLog("Allow microphone when prompted to use in-room capture.")
-        }
+        micStreamForDiarized.getTracks().forEach((t) => t.stop())
         setStatus("ready")
       }
-    } else {
+    } else if (!diarize) {
       addLog("Initializing dual-stream prospect audio...")
       const prospectResult = await setupProspectStream()
       if (!prospectResult) {
