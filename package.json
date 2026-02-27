@@ -9,7 +9,8 @@
     "start": "next start",
     "lint": "eslint .",
     "ws-server": "node server/websocket-stt-server.js",
-    "dev:next": "next dev"
+    "dev:next": "next dev",
+    "ext:build": "vite build --config extension/vite.config.ts && node extension/build.js"
   },
   "dependencies": {
     "@google-cloud/speech": "^6.7.1",
@@ -76,12 +77,15 @@
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4.1.13",
+    "@types/chrome": "^0.1.37",
     "@types/node": "^22",
     "@types/react": "^19",
     "@types/react-dom": "^19",
     "@types/ws": "^8.18.1",
+    "@vitejs/plugin-react": "^5.1.4",
     "postcss": "^8.5",
     "tailwindcss": "^3.4.17",
-    "typescript": "5.7.3"
+    "typescript": "5.7.3",
+    "vite": "^7.3.1"
   }
 }

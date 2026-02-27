@@ -2,6 +2,9 @@
 
 import { useState, useCallback, useRef, useEffect } from 'react'
 
+let _wssBaseUrl = '';
+export function setWssBaseUrl(url: string) { _wssBaseUrl = url; }
+
 export interface TranscriptResult {
   text: string
   isFinal: boolean
@@ -122,46 +125,38 @@ export function useSTTStream(
     return Math.sqrt(sum / buffer.length)
   }, [])
 
-  // Connect to WebSocket server with auto port discovery (3002-3010)
+  // Connect to WebSocket server (cloud WSS or local port discovery)
   const connectWebSocket = useCallback(async (speaker: 'salesperson' | 'prospect', sessionId: string, diarize = false): Promise<WebSocket> => {
-    const tryPort = (port: number): Promise<WebSocket> => {
+    const params = `?session=${sessionId}&speaker=${speaker}${diarize ? '&diarize=true' : ''}`
+
+    if (_wssBaseUrl) {
       return new Promise((resolve, reject) => {
-        console.log(`[TRACE-A] ${speaker} - Trying WebSocket on port ${port}... (diarize: ${diarize})`)
-
-        const ws = new WebSocket(`ws://localhost:${port}?session=${sessionId}&speaker=${speaker}${diarize ? '&diarize=true' : ''}`)
-
-        const timeout = setTimeout(() => {
-          ws.close()
-          reject(new Error(`Timeout on port ${port}`))
-        }, 3000)
-
-        ws.onopen = () => {
-          clearTimeout(timeout)
-          console.log(`[TRACE-A] ${speaker} - WebSocket CONNECTED on port ${port}`)
-          resolve(ws)
-        }
-
-        ws.onerror = () => {
-          clearTimeout(timeout)
-          reject(new Error(`Failed on port ${port}`))
-        }
+        console.log(`[TRACE-A] ${speaker} - Connecting to cloud WSS: ${_wssBaseUrl}`)
+        const ws = new WebSocket(`${_wssBaseUrl}${params}`)
+        const timeout = setTimeout(() => { ws.close(); reject(new Error('Cloud WSS timeout')) }, 5000)
+        ws.onopen = () => { clearTimeout(timeout); console.log(`[TRACE-A] ${speaker} - Cloud WSS CONNECTED`); resolve(ws) }
+        ws.onerror = () => { clearTimeout(timeout); reject(new Error('Cloud WSS failed')) }
       })
     }
 
-    // Try ports 3002-3010
+    const tryPort = (port: number): Promise<WebSocket> => {
+      return new Promise((resolve, reject) => {
+        console.log(`[TRACE-A] ${speaker} - Trying WebSocket on port ${port}... (diarize: ${diarize})`)
+        const ws = new WebSocket(`ws://localhost:${port}${params}`)
+        const timeout = setTimeout(() => { ws.close(); reject(new Error(`Timeout on port ${port}`)) }, 3000)
+        ws.onopen = () => { clearTimeout(timeout); console.log(`[TRACE-A] ${speaker} - WebSocket CONNECTED on port ${port}`); resolve(ws) }
+        ws.onerror = () => { clearTimeout(timeout); reject(new Error(`Failed on port ${port}`)) }
+      })
+    }
+
     const ports = [3002, 3003, 3004, 3005, 3006, 3007, 3008, 3009, 3010]
     let lastError: Error | null = null
-
     for (const port of ports) {
-      try {
-        const ws = await tryPort(port)
-        return ws
-      } catch (err) {
+      try { return await tryPort(port) } catch (err) {
         lastError = err instanceof Error ? err : new Error(String(err))
         console.log(`[TRACE-A] ${speaker} - Port ${port} failed, trying next...`)
       }
     }
-
     console.error(`[WS STT ${speaker}] All ports failed (3002-3010)`)
     throw lastError || new Error('WebSocket connection failed - server may not be running')
   }, [])

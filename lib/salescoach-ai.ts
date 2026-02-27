@@ -3,6 +3,10 @@
  * Calls server-side API routes (so API key stays secure)
  */
 
+let _apiBaseUrl = '';
+export function setApiBaseUrl(url: string) { _apiBaseUrl = url; }
+function apiUrl(path: string) { return _apiBaseUrl ? `${_apiBaseUrl}${path}` : path; }
+
 export interface TranscriptTurn {
   speaker: 'salesperson' | 'prospect';
   text: string;
@@ -64,7 +68,7 @@ export async function generateLiveCoaching(
   try {
     console.log('[Client] Sending to /api/coach/live:', { speaker: lastSpeaker, turns: recentTranscript.length, stream: shouldStream });
 
-    const response = await fetch('/api/coach/live', {
+    const response = await fetch(apiUrl('/api/coach/live'), {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -222,7 +226,7 @@ export async function generatePostCallSummary(
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), 30000); // 30 second timeout
 
-    const response = await fetch('/api/coach/summary', {
+    const response = await fetch(apiUrl('/api/coach/summary'), {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
