@@ -229,6 +229,12 @@ export function useSTTStream(
             return
           }
 
+          if (data.type === 'error') {
+            console.error(`[WS STT ${speaker}] ❌ Server Error:`, data.message)
+            setError(data.message)
+            return
+          }
+
           if (data.type === 'final') {
             // TRACE D: gotFinal
             transcriptCountRef.current++
@@ -438,10 +444,10 @@ export function useSTTStream(
             bytesSentRef.current += pcmData.byteLength
             wsToSend.send(pcmData.buffer)
 
-            // Log data volume every ~1MB
-            if (Math.floor(bytesSentRef.current / (1024 * 1024)) > Math.floor((bytesSentRef.current - pcmData.byteLength) / (1024 * 1024))) {
-              const totalMB = (bytesSentRef.current / (1024 * 1024)).toFixed(1)
-              console.log(`[WS STT ${speaker}] 📤 Total audio sent: ${totalMB}MB`)
+            // Log data volume every ~100KB for better visibility during short calls
+            if (Math.floor(bytesSentRef.current / (100 * 1024)) > Math.floor((bytesSentRef.current - pcmData.byteLength) / (100 * 1024))) {
+              const totalKB = (bytesSentRef.current / 1024).toFixed(0)
+              console.log(`[WS STT ${speaker}] 📤 Audio sent: ${totalKB}KB`)
             }
           }
         }
@@ -475,7 +481,7 @@ export function useSTTStream(
         if (ctx && ctx.state === 'suspended' && isStreamingRef.current) {
           ctx.resume().then(() => {
             console.log(`[WS STT ${speaker}] AudioContext resumed (was suspended)`)
-          }).catch(() => {})
+          }).catch(() => { })
         }
       }, 3000)
     } catch (err) {
@@ -593,7 +599,7 @@ export function useSTTStream(
       if (ctx && ctx.state === 'suspended') {
         ctx.resume().then(() => {
           console.log('[WS STT] AudioContext resumed on visibility (was suspended)')
-        }).catch(() => {})
+        }).catch(() => { })
       }
     }
     document.addEventListener('visibilitychange', onVisibilityChange)

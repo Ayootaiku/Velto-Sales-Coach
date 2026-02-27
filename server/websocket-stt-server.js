@@ -14,11 +14,20 @@ const dotenv = require('dotenv');
 dotenv.config({ path: '.env.local' });
 
 // Railway/Cloud: Load Google credentials from env var if no local file exists
-if (process.env.GOOGLE_APPLICATION_CREDENTIALS_JSON && !fs.existsSync(process.env.GOOGLE_APPLICATION_CREDENTIALS || '')) {
-  const credPath = path.join(require('os').tmpdir(), 'gcloud-creds.json');
-  fs.writeFileSync(credPath, process.env.GOOGLE_APPLICATION_CREDENTIALS_JSON);
-  process.env.GOOGLE_APPLICATION_CREDENTIALS = credPath;
-  console.log('[WS Server] Loaded Google credentials from GOOGLE_APPLICATION_CREDENTIALS_JSON env var');
+if (process.env.GOOGLE_APPLICATION_CREDENTIALS_JSON) {
+  try {
+    const credPath = path.join(require('os').tmpdir(), 'gcloud-creds.json');
+    fs.writeFileSync(credPath, process.env.GOOGLE_APPLICATION_CREDENTIALS_JSON);
+    process.env.GOOGLE_APPLICATION_CREDENTIALS = credPath;
+    console.log('[WS Server] ✅ Google credentials successfully written to:', credPath);
+    // Explicitly verify the written file
+    const stats = fs.statSync(credPath);
+    console.log(`[WS Server] Credential file size: ${stats.size} bytes`);
+  } catch (err) {
+    console.error('[WS Server] ❌ Failed to write Google credentials:', err.message);
+  }
+} else {
+  console.log('[WS Server] ℹ️ GOOGLE_APPLICATION_CREDENTIALS_JSON not found, relying on GOOGLE_APPLICATION_CREDENTIALS or default auth');
 }
 
 const DEFAULT_PORT = parseInt(process.env.PORT) || parseInt(process.env.WS_PORT) || 3002;
@@ -250,6 +259,9 @@ async function startServer() {
         })
         .on('drain', () => {
           // No action needed for drain
+        })
+        .on('response', (response) => {
+          console.log(`[WS Server ${sessionId}] 📡 STT Stream Response Metadata:`, JSON.stringify(response));
         });
 
       sessions.set(ws, {

@@ -427,7 +427,10 @@ export function SalesCoachOverlay() {
       }
 
       if (handleTranscriptRef.current) {
+        addLog(`[Diarize] Routing turn to handleTranscript as ${identifiedSpeaker.toUpperCase()}`)
         handleTranscriptRef.current(result.text, identifiedSpeaker)
+      } else {
+        console.warn(`[Diarize] ❌ handleTranscriptRef is NULL!`)
       }
 
       // AUTO-REFRESH WATCHDOG: Restart stream on speaker turn to reset Google's 60s clock
@@ -460,10 +463,12 @@ export function SalesCoachOverlay() {
     // Trigger coaching when prospect speech ends
     if (handleTranscriptRef.current) {
       console.log(`[Prospect onSpeechEnd] ✅ Calling handleTranscript...`)
+      addLog(`🎯 Prospect Turn End: "${transcript.text.substring(0, 30)}..."`)
       handleTranscriptRef.current(transcript.text, 'prospect')
       console.log(`[Prospect onSpeechEnd] ✅ handleTranscript completed`)
     } else {
       console.error(`[Prospect onSpeechEnd] ❌ handleTranscriptRef.current is NULL!`)
+      addLog(`❌ ERROR: handleTranscriptRef is missing`)
     }
   })
 
@@ -523,13 +528,13 @@ export function SalesCoachOverlay() {
     const isProspect = speaker === 'prospect'
 
     if (!isProspect) {
-      addLog(`⏭️ Skip: Speaker is ${speaker}, not prospect`)
+      addLog(`⏭️ Skip: RunCoaching called for ${speaker}, but we only coach on Prospect turns.`)
       return
     }
 
     // Prevent duplicate coaching requests
     if (isCoachingInProgressRef.current) {
-      addLog(`⏳ Skip: Coaching already in progress (blocking)`)
+      addLog(`⏳ Skip: Coaching already in progress (Ref: ${isCoachingInProgressRef.current})`)
       return
     }
 
@@ -711,7 +716,7 @@ export function SalesCoachOverlay() {
       return
     }
 
-    addLog(`🎯 SPEECH END detected for ${speaker}: "${text.substring(0, 30)}..."`)
+    addLog(`🎯 handleTranscript called: speaker=${speaker}, textLen=${text.length}`)
 
     const turn: TranscriptTurn = { speaker, text, timestamp: new Date().toISOString() }
     transcriptTurnsRef.current.push(turn)
@@ -720,7 +725,7 @@ export function SalesCoachOverlay() {
       addLog(`⚡ TRIGGERING AI COACHING for prospect speech`)
       runCoaching([...transcriptTurnsRef.current], speaker)
     } else {
-      addLog(`ℹ️ Salesperson speech detected - storing transcript only`)
+      addLog(`ℹ️ Salesperson speech stored. Coaching skipped.`)
     }
   }, [runCoaching, addLog])
 
@@ -984,65 +989,70 @@ export function SalesCoachOverlay() {
   const handleStartCoaching = useCallback(async (mode: 'dual' | 'diarized' = 'dual') => {
     const diarize = mode === 'diarized'
 
-    // In-room: request microphone FIRST (before any setState/addLog) so extension side panel gets the permission prompt
-    let micStreamForDiarized: MediaStream | null = null
+    // In-room: go to next screen immediately so button "works", request mic from same click (works in extension + web)
     if (diarize) {
-      try {
-        micStreamForDiarized = await navigator.mediaDevices.getUserMedia({
-          audio: {
-            echoCancellation: true,
-            noiseSuppression: true,
-            autoGainControl: true,
-            channelCount: 1,
-            sampleRate: 16000
+      setIsDiarized(true)
+      addLog("Starting session (DIARIZED mode)...")
+      resetTrace()
+      setStatus("listening")
+      setCallTime(0)
+      setCards([])
+      transcriptTurnsRef.current = []
+      setSalespersonTag(null)
+      setManualSpeaker('salesperson')
+
+      const micPromise = navigator.mediaDevices.getUserMedia({
+        audio: {
+          echoCancellation: true,
+          noiseSuppression: true,
+          autoGainControl: true,
+          channelCount: 1,
+          sampleRate: 16000
+        }
+      })
+      micPromise
+        .then((micStreamForDiarized) => {
+          addLog("🚀 INITIALIZING IN-ROOM CAPTURE (Diarization V1.2)...")
+          updateTrace({ A: true, turnId: 0 })
+          salespersonStream.startStream('salesperson', micStreamForDiarized, true).then(() => {
+            addLog("✅ WEBSOCKET CONNECTED - Port 3002")
+            addLog("🎙️ CAPTURE ACTIVE: Use the buttons to switch speakers.")
+          }).catch((e: any) => {
+            addLog(`❌ Diarization failed: ${e?.message || e}`)
+            micStreamForDiarized.getTracks().forEach((t) => t.stop())
+            setStatus("ready")
+          })
+        })
+        .catch((e: any) => {
+          setStatus("ready")
+          setIsDiarized(false)
+          addLog(`❌ Microphone denied: ${e?.message || e}`)
+          if (e?.name === 'NotAllowedError' || e?.message?.includes('Permission dismissed')) {
+            addLog("Click In-Room Mode again and choose Allow when the browser asks for microphone.")
           }
         })
-      } catch (e: any) {
-        setStatus("ready")
-        setIsDiarized(false)
-        addLog(`❌ Microphone denied: ${e?.message || e}`)
-        if (e?.name === 'NotAllowedError' || e?.message?.includes('Permission dismissed')) {
-          addLog("Click In room again and choose Allow when the browser asks for microphone.")
-        }
-        return
-      }
+      return
     }
 
-    setIsDiarized(diarize)
-    addLog(`Starting session (${mode.toUpperCase()} mode)...`)
-    resetTrace() // Reset trace at start
-    setStatus("listening") // Immediate transition
-
+    // Dual mode
+    setIsDiarized(false)
+    addLog("Starting session (DUAL mode)...")
+    resetTrace()
+    setStatus("listening")
     setCallTime(0)
     setCards([])
     transcriptTurnsRef.current = []
 
-    if (diarize && micStreamForDiarized) {
-      addLog("🚀 INITIALIZING IN-ROOM CAPTURE (Diarization V1.2)...")
-      setSalespersonTag(null)
-      setManualSpeaker('salesperson')
-      try {
-        updateTrace({ A: true, turnId: 0 })
-        await salespersonStream.startStream('salesperson', micStreamForDiarized, true)
-        addLog("✅ WEBSOCKET CONNECTED - Port 3002")
-        addLog("🎙️ CAPTURE ACTIVE: Use the buttons to switch speakers.")
-      } catch (e: any) {
-        addLog(`❌ Diarization failed: ${e.message || e}`)
-        micStreamForDiarized.getTracks().forEach((t) => t.stop())
-        setStatus("ready")
-      }
-    } else if (!diarize) {
-      addLog("Initializing dual-stream prospect audio...")
-      const prospectResult = await setupProspectStream()
-      if (!prospectResult) {
-        addLog("❌ CRITICAL: Prospect stream failed - no prospect audio captured!")
-        setCards([{
-          id: 'error-' + Date.now(),
-          suggestion: "⚠️ Prospect audio not captured",
-          reason: "Click 'Share Session' and CHECK 'Share tab audio' in terminal popup",
-          type: 'reframe'
-        }])
-      }
+    addLog("Initializing dual-stream prospect audio...")
+    const prospectResult = await setupProspectStream()
+    if (!prospectResult) {
+      addLog("❌ CRITICAL: Prospect stream failed - no prospect audio captured!")
+      setCards([{
+        id: 'error-' + Date.now(),
+        suggestion: "⚠️ Prospect audio not captured",
+        reason: "Click 'Share Session' and CHECK 'Share tab audio' in terminal popup",
+        type: 'reframe'
+      }])
     }
   }, [salespersonStream, addLog, resetTrace, updateTrace])
 
@@ -1144,12 +1154,14 @@ export function SalesCoachOverlay() {
 
               <div className="flex flex-col gap-3 w-full px-6">
                 <button
+                  type="button"
                   onClick={() => handleStartCoaching('dual')}
                   className="w-full py-3.5 rounded-xl bg-[#d4ff32] hover:bg-[#e0ff66] text-[#000000] text-[13px] font-bold tracking-wide transition-all shadow-lg shadow-[#d4ff32]/10"
                 >
                   Start Session
                 </button>
                 <button
+                  type="button"
                   onClick={() => handleStartCoaching('diarized')}
                   className="w-full py-3.5 rounded-xl bg-transparent border border-[#3f3f46] hover:bg-[#2c2c2e] text-[#ffffff] text-[13px] font-bold tracking-wide transition-all"
                 >
