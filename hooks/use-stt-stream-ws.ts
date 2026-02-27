@@ -129,10 +129,13 @@ export function useSTTStream(
   const connectWebSocket = useCallback(async (speaker: 'salesperson' | 'prospect', sessionId: string, diarize = false): Promise<WebSocket> => {
     const params = `?session=${sessionId}&speaker=${speaker}${diarize ? '&diarize=true' : ''}`
 
-    // Extension build-time (VITE_RAILWAY_WSS) or runtime (inExtension) or setter (_wssBaseUrl)
+    // Extension: always use Railway (setter, then Vite define, then hardcoded fallback — never localhost)
     const inExtension = typeof chrome !== 'undefined' && !!chrome.runtime?.id
     const railwayWss = (typeof import.meta !== 'undefined' && (import.meta as { env?: { VITE_RAILWAY_WSS?: string } }).env?.VITE_RAILWAY_WSS) || ''
-    const cloudBase = _wssBaseUrl || railwayWss || (inExtension ? 'wss://velto-sales-coach-production.up.railway.app' : '')
+    const railwayFallback = 'wss://velto-sales-coach-production.up.railway.app'
+    const cloudBase = inExtension
+      ? (_wssBaseUrl || railwayWss || railwayFallback)
+      : (_wssBaseUrl || railwayWss || '')
 
     if (cloudBase) {
       return new Promise((resolve, reject) => {
