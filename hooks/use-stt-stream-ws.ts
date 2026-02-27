@@ -75,6 +75,7 @@ export function useSTTStream(
   const lastAudioProcessTimeRef = useRef<number>(Date.now())
   const isStreamingRef = useRef(false) // Use ref for stable closure access
   const watchdogIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null)
+  const resumeCheckIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null)
   const onSpeechEndRef = useRef(onSpeechEnd)
   const onSpeakerTurnRef = useRef(onSpeakerTurn)
   const isDiarizedRef = useRef(false)
@@ -361,6 +362,9 @@ export function useSTTStream(
       const targetBufferSize = 16000 * 0.1 // 100ms at 16kHz = 1600 samples
 
       scriptProcessor.onaudioprocess = (audioEvent) => {
+        const now = Date.now()
+        lastAudioProcessTimeRef.current = now // Mark that we're receiving callbacks (before any early return)
+
         // ALWAYS use the current WS reference (it might change during rollover)
         const currentWs = wsRef.current
         if (!currentWs || currentWs.readyState !== WebSocket.OPEN) return
@@ -372,9 +376,6 @@ export function useSTTStream(
         const rms = calculateRMS(inputData)
         rmsHistoryRef.current.push(rms)
         if (rmsHistoryRef.current.length > 30) rmsHistoryRef.current.shift()
-
-        const now = Date.now()
-        lastAudioProcessTimeRef.current = now
         const avgRMS = rmsHistoryRef.current.reduce((a, b) => a + b, 0) / rmsHistoryRef.current.length
         const normalizedLevel = Math.min(100, Math.round(avgRMS * 500))
         audioLevelRef.current = audioLevelRef.current * 0.7 + normalizedLevel * 0.3
@@ -466,6 +467,17 @@ export function useSTTStream(
       }, 2000)
 
       console.log(`[WS STT ${speaker}] ✅ Audio processing started (stream active: ${audioStreamToUse.active})`)
+
+      // Periodically resume AudioContext if suspended (e.g. side panel lost focus) so TRACE-C/TRACE-D can receive partials/finals
+      if (resumeCheckIntervalRef.current) clearInterval(resumeCheckIntervalRef.current)
+      resumeCheckIntervalRef.current = setInterval(() => {
+        const ctx = audioContextRef.current
+        if (ctx && ctx.state === 'suspended' && isStreamingRef.current) {
+          ctx.resume().then(() => {
+            console.log(`[WS STT ${speaker}] AudioContext resumed (was suspended)`)
+          }).catch(() => {})
+        }
+      }, 3000)
     } catch (err) {
       console.error(`[WS STT ${speaker}] ❌ Error starting stream:`, err)
       setError(err instanceof Error ? err.message : 'Failed to start stream')
@@ -516,6 +528,10 @@ export function useSTTStream(
     if (watchdogIntervalRef.current) {
       clearInterval(watchdogIntervalRef.current)
       watchdogIntervalRef.current = null
+    }
+    if (resumeCheckIntervalRef.current) {
+      clearInterval(resumeCheckIntervalRef.current)
+      resumeCheckIntervalRef.current = null
     }
 
     if (streamRef.current && !keepTracks) {
@@ -568,6 +584,21 @@ export function useSTTStream(
   useEffect(() => {
     return () => { void stopStream() }
   }, [stopStream])
+
+  // Keep AudioContext running when side panel becomes visible (Chrome often suspends when panel loses focus; no audio = no TRACE-C)
+  useEffect(() => {
+    const onVisibilityChange = () => {
+      if (typeof document === 'undefined' || document.visibilityState !== 'visible') return
+      const ctx = audioContextRef.current
+      if (ctx && ctx.state === 'suspended') {
+        ctx.resume().then(() => {
+          console.log('[WS STT] AudioContext resumed on visibility (was suspended)')
+        }).catch(() => {})
+      }
+    }
+    document.addEventListener('visibilitychange', onVisibilityChange)
+    return () => document.removeEventListener('visibilitychange', onVisibilityChange)
+  }, [])
 
   return {
     isConnected,
