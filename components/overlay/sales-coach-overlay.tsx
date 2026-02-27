@@ -998,13 +998,27 @@ export function SalesCoachOverlay() {
       setSalespersonTag(null)
       setManualSpeaker('salesperson')
       try {
+        // Request microphone immediately from user gesture (click) so the browser shows the permission prompt
+        addLog("Requesting microphone access...")
+        const micStream = await navigator.mediaDevices.getUserMedia({
+          audio: {
+            echoCancellation: true,
+            noiseSuppression: true,
+            autoGainControl: true,
+            channelCount: 1,
+            sampleRate: 16000
+          }
+        })
         updateTrace({ A: true, turnId: 0 })
         // Use 5.0x gain boost for diarization (enhanced room capture)
-        await salespersonStream.startStream('salesperson', undefined, true)
+        await salespersonStream.startStream('salesperson', micStream, true)
         addLog("✅ WEBSOCKET CONNECTED - Port 3002")
         addLog("🎙️ CAPTURE ACTIVE: Use the buttons to switch speakers.")
       } catch (e: any) {
         addLog(`❌ Diarization failed: ${e.message || e}`)
+        if (e?.name === 'NotAllowedError' || e?.message?.includes('Permission dismissed')) {
+          addLog("Allow microphone when prompted to use in-room capture.")
+        }
         setStatus("ready")
       }
     } else {
