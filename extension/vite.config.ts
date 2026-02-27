@@ -49,5 +49,6 @@ export default defineConfig({
   define: {
     'process.env.NODE_ENV': JSON.stringify('production'),
     'process.env': '{}',
+    'import.meta.env.VITE_RAILWAY_WSS': JSON.stringify('wss://velto-sales-coach-production.up.railway.app'),
   },
 });

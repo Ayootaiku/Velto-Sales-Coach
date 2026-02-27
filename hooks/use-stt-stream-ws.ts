@@ -129,9 +129,10 @@ export function useSTTStream(
   const connectWebSocket = useCallback(async (speaker: 'salesperson' | 'prospect', sessionId: string, diarize = false): Promise<WebSocket> => {
     const params = `?session=${sessionId}&speaker=${speaker}${diarize ? '&diarize=true' : ''}`
 
-    // Extension context: use Railway WSS if setter wasn't called yet (e.g. bundle order or cached build)
+    // Extension build-time (VITE_RAILWAY_WSS) or runtime (inExtension) or setter (_wssBaseUrl)
     const inExtension = typeof chrome !== 'undefined' && !!chrome.runtime?.id
-    const cloudBase = _wssBaseUrl || (inExtension ? 'wss://velto-sales-coach-production.up.railway.app' : '')
+    const railwayWss = (typeof import.meta !== 'undefined' && (import.meta as { env?: { VITE_RAILWAY_WSS?: string } }).env?.VITE_RAILWAY_WSS) || ''
+    const cloudBase = _wssBaseUrl || railwayWss || (inExtension ? 'wss://velto-sales-coach-production.up.railway.app' : '')
 
     if (cloudBase) {
       return new Promise((resolve, reject) => {
