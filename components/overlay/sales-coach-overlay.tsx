@@ -989,7 +989,7 @@ export function SalesCoachOverlay() {
   const handleStartCoaching = useCallback(async (mode: 'dual' | 'diarized' = 'dual') => {
     const diarize = mode === 'diarized'
 
-    // In-room: go to next screen immediately so button "works", request mic from same click (works in extension + web)
+    // In-room: go to next screen immediately so button "works", request mic (extension: optional permission first, then getUserMedia — same as website prompt)
     if (diarize) {
       setIsDiarized(true)
       addLog("Starting session (DIARIZED mode)...")
@@ -1001,7 +1001,7 @@ export function SalesCoachOverlay() {
       setSalespersonTag(null)
       setManualSpeaker('salesperson')
 
-      const micPromise = navigator.mediaDevices.getUserMedia({
+      const audioConstraints = {
         audio: {
           echoCancellation: true,
           noiseSuppression: true,
@@ -1009,9 +1009,18 @@ export function SalesCoachOverlay() {
           channelCount: 1,
           sampleRate: 16000
         }
-      })
-      micPromise
-        .then((micStreamForDiarized) => {
+      }
+      const requestMic = (): Promise<MediaStream> => {
+        const inExtension = typeof chrome !== 'undefined' && chrome.runtime?.id && chrome.permissions?.request
+        if (inExtension) {
+          return ((chrome as any).permissions.request({ permissions: ['audioCapture'] }) as Promise<boolean>)
+            .then(() => navigator.mediaDevices.getUserMedia(audioConstraints))
+            .catch(() => navigator.mediaDevices.getUserMedia(audioConstraints))
+        }
+        return navigator.mediaDevices.getUserMedia(audioConstraints)
+      }
+      requestMic()
+        .then((micStreamForDiarized: MediaStream) => {
           addLog("🚀 INITIALIZING IN-ROOM CAPTURE (Diarization V1.2)...")
           updateTrace({ A: true, turnId: 0 })
           salespersonStream.startStream('salesperson', micStreamForDiarized, true).then(() => {
