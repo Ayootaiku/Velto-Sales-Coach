@@ -9,4 +9,31 @@ instrumentation-client.ts
 node_modules/
 .next/
 .env*.local
+.env*
 .DS_Store
+
+# Secrets & credentials
+Open Router API key.env.txt
+mcp-server/config/*.json
+
+# Logs
+*.log
+dev-server.err.log
+dev-server.out.log
+dev-server.log
+dev.log
+error.log
+server.log
+server_debug.log
+ws-server.log
+
+# Runtime files
+.ws-port
+server.pid
+nul
+
+# Backups
+checkpoint_backup/
+
+# Extension build output
+extension/dist/

@@ -8,9 +8,11 @@ type OrbState = "idle" | "listening" | "active" | "processing"
 export function PresenceOrb({
   state = "idle",
   size = "default",
+  label,
 }: {
   state: OrbState
   size?: "default" | "compact"
+  label?: string
 }) {
   const isActive = state === "listening" || state === "active"
   let mappedAgentState: any = null;
@@ -28,7 +30,25 @@ export function PresenceOrb({
   }
 
   return (
-    <div className="relative flex flex-col items-center justify-center h-32 w-full bg-transparent">
+    <div className="relative flex flex-col items-center justify-center h-32 w-full bg-transparent gap-3">
+      {/* Status text - Now in flow above the orb */}
+      <div className="flex flex-col items-center">
+        <p
+          className={cn(
+            "text-[9px] font-bold uppercase tracking-widest transition-all duration-500",
+            isActive ? "text-[#d4ff32]" : "text-[#71717a]"
+          )}
+        >
+          {label ? label : (
+            <>
+              {state === "idle" && "Ready"}
+              {state === "listening" && "Listening"}
+              {state === "active" && "Analysis Active"}
+              {state === "processing" && "Processing"}
+            </>
+          )}
+        </p>
+      </div>
 
       {/* 3D Orb Agent */}
       <div className="relative flex items-center justify-center w-[100px] h-[100px] rounded-full overflow-hidden">
@@ -38,21 +58,6 @@ export function PresenceOrb({
             agentState={mappedAgentState}
           />
         </div>
-      </div>
-
-      {/* Status text */}
-      <div className="absolute -bottom-4 flex flex-col items-center gap-1">
-        <p
-          className={cn(
-            "text-[9px] font-bold uppercase tracking-widest transition-all duration-500",
-            isActive ? "text-[#d4ff32]" : "text-[#71717a]"
-          )}
-        >
-          {state === "idle" && "Ready"}
-          {state === "listening" && "Listening"}
-          {state === "active" && "Analysis Active"}
-          {state === "processing" && "Processing"}
-        </p>
       </div>
     </div>
   )

@@ -28,7 +28,7 @@ export interface UseSTTStreamReturn {
   onSpeechEnd?: (transcript: TranscriptResult) => void
 }
 
-const SILENCE_THRESHOLD_MS = 300
+const SILENCE_THRESHOLD_MS = 200
 const FINAL_SILENCE_THRESHOLD_MS = 800
 const RMS_THRESHOLD = 0.01 // Minimum RMS to consider as real audio
 

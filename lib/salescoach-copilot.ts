@@ -22,17 +22,17 @@ export interface CoachingResponse {
   confidence: number; // 0-100
 }
 
-export type Stage = 
-  | 'Greeting' 
-  | 'Discovery' 
-  | 'Hesitation' 
-  | 'Objection:Price' 
-  | 'Objection:Timing' 
-  | 'Objection:Authority' 
-  | 'Objection:Value' 
+export type Stage =
+  | 'Greeting'
+  | 'Discovery'
+  | 'Hesitation'
+  | 'Objection:Price'
+  | 'Objection:Timing'
+  | 'Objection:Authority'
+  | 'Objection:Value'
   | 'Objection:Need'
-  | 'Competitor' 
-  | 'Close' 
+  | 'Competitor'
+  | 'Close'
   | 'Logistics';
 
 export interface TranscriptTurn {
@@ -44,7 +44,7 @@ export interface TranscriptTurn {
 
 // STRICT FILLER FILTER - Don't coach on these
 const FILLER_WORDS = new Set([
-  'um', 'uh', 'er', 'ah', 'hm', 'mm', 
+  'um', 'uh', 'er', 'ah', 'hm', 'mm',
   'like', 'you know', 'i mean', 'sort of', 'kind of',
   'well', 'so', 'okay', 'right', 'yeah'
 ]);
@@ -83,7 +83,7 @@ function isPureFiller(text: string): boolean {
  */
 function detectStage(text: string): Stage {
   const lowerText = text.toLowerCase();
-  
+
   // Check objections first (highest priority)
   // Check "not interested" and similar rejections BEFORE other objections
   if (STAGE_PATTERNS['Objection:Need'].some(p => p.test(lowerText))) return 'Objection:Need';
@@ -92,19 +92,19 @@ function detectStage(text: string): Stage {
   if (STAGE_PATTERNS['Objection:Authority'].some(p => p.test(lowerText))) return 'Objection:Authority';
   if (STAGE_PATTERNS['Competitor'].some(p => p.test(lowerText))) return 'Competitor';
   if (STAGE_PATTERNS['Objection:Value'].some(p => p.test(lowerText))) return 'Objection:Value';
-  
+
   // Check close signals
   if (STAGE_PATTERNS['Close'].some(p => p.test(lowerText))) return 'Close';
-  
+
   // Check logistics
   if (STAGE_PATTERNS['Logistics'].some(p => p.test(lowerText))) return 'Logistics';
-  
+
   // Check hesitation
   if (STAGE_PATTERNS['Hesitation'].some(p => p.test(lowerText))) return 'Hesitation';
-  
+
   // Check greeting
   if (STAGE_PATTERNS['Greeting'].some(p => p.test(lowerText))) return 'Greeting';
-  
+
   // Default to discovery
   return 'Discovery';
 }
@@ -172,7 +172,7 @@ function generateSayNext(stage: Stage): string {
       "Looking forward to it. Is there anything else you need before we meet?"
     ]
   };
-  
+
   const options = responses[stage];
   return options[Math.floor(Math.random() * options.length)];
 }
@@ -202,18 +202,18 @@ function generateInsight(stage: Stage): string {
  */
 function calculateConfidence(stage: Stage, text: string): number {
   let confidence = 75; // Base
-  
+
   // Boost for clear objection keywords
   if (stage.startsWith('Objection:') || stage === 'Competitor') confidence += 15;
   if (stage === 'Close') confidence += 10;
-  
+
   // Penalty for very short text
   if (text.length < 10) confidence -= 20;
   if (text.length < 5) confidence -= 30;
-  
+
   // Boost for longer, specific text
   if (text.length > 30) confidence += 5;
-  
+
   return Math.min(Math.max(confidence, 30), 100);
 }
 
@@ -235,22 +235,51 @@ function getSlidingWindow(turns: TranscriptTurn[], maxTurns: number = 6): Transc
  */
 export function processTranscriptUltraFast(
   currentTurn: TranscriptTurn,
-  previousTurns: TranscriptTurn[]
+  previousTurns: TranscriptTurn[],
+  settings?: any
 ): CoachingResponse | null {
   const { speaker, text, isFinal } = currentTurn;
-  
+
   // Filter pure filler - never coach on noise
   if (isPureFiller(text)) {
     return null;
   }
-  
+
   // PRIMARY CASE: Prospect spoke - ALWAYS coach
   if (speaker === 'prospect') {
     const stage = detectStage(text);
-    const say_next = generateSayNext(stage);
-    const insight = generateInsight(stage);
+    let say_next = generateSayNext(stage);
+    let insight = generateInsight(stage);
+
+    // Quick personalization based on settings
+    let prefix = "";
+    if (settings?.emotionStyle === 'Assertive') {
+      prefix = "I hear you. ";
+      say_next = say_next + " Let's get this done.";
+      insight = "Direct approach: " + insight;
+    } else if (settings?.emotionStyle === 'Empathetic') {
+      prefix = "I completely understand. ";
+      insight = "Trust-building: " + insight;
+    } else if (settings?.emotionStyle === 'Energetic') {
+      prefix = "That's great! ";
+      insight = "Momentum-focused: " + insight;
+    }
+
+    // Objection Handling Personalization
+    if (stage.startsWith('Objection:')) {
+      if (settings?.objectionMode === 'Hard Pushback') {
+        say_next = "Actually, " + say_next.charAt(0).toLowerCase() + say_next.slice(1);
+      } else if (settings?.objectionMode === 'Question-Based') {
+        say_next = say_next + " What's the main concern there?";
+      } else if (settings?.objectionMode === 'Story-Based') {
+        say_next = "We've seen this before. " + say_next;
+      }
+    }
+
+    say_next = prefix + say_next;
+
     const confidence = calculateConfidence(stage, text);
-    
+
     return {
       stage,
       say_next,
@@ -258,31 +287,31 @@ export function processTranscriptUltraFast(
       confidence
     };
   }
-  
+
   // SECONDARY CASE: Salesperson spoke - only coach if they made a mistake
   if (speaker === 'salesperson' && isFinal) {
     // Check if they missed an objection in previous prospect turn
     const lastProspectTurn = [...previousTurns].reverse().find(t => t.speaker === 'prospect');
-    
+
     if (lastProspectTurn) {
       const lastStage = detectStage(lastProspectTurn.text);
       const isObjection = lastStage.startsWith('Objection:') || lastStage === 'Competitor';
-      
+
       // If prospect raised objection and salesperson didn't address it
       if (isObjection && !text.toLowerCase().includes('price') && !text.toLowerCase().includes('budget')) {
         return {
           stage: lastStage,
           say_next: generateSayNext(lastStage),
-          insight: "Prospect raised objection - address it directly",
+          insight: "Prospect raised objection - address it directly based on your " + (settings?.emotionStyle || "current") + " style.",
           confidence: 90
         };
       }
     }
-    
+
     // No coaching needed on salesperson speech
     return null;
   }
-  
+
   return null;
 }
 
@@ -364,7 +393,7 @@ RESPOND NOW WITH JSON ONLY:`;
         response_format: { type: 'json_object' }
       }),
     });
-    
+
     if (!response.ok) {
       return null;
     }
@@ -417,17 +446,17 @@ export function checkAudioHealth(
   if (!isListening) {
     return { status: 'ERROR', message: 'Not listening - check mic' };
   }
-  
+
   const timeSinceLastTranscript = Date.now() - lastTranscriptTime;
-  
+
   if (timeSinceLastTranscript > 5000) {
     return { status: 'NO AUDIO', message: 'No audio detected' };
   }
-  
+
   if (timeSinceLastTranscript > 2000) {
     return { status: 'NO AUDIO', message: 'Audio quiet - speak louder?' };
   }
-  
+
   return { status: 'LIVE' };
 }
 
@@ -448,11 +477,11 @@ export async function generatePostCallSummary(
       focusNextCall: 'Prepare better discovery questions'
     };
   }
-  
+
   const transcript = turns
     .map(t => `${t.speaker}: "${t.text}"`)
     .join('\n');
-  
+
   const prompt = `Summarize this sales call in JSON:
 
 TRANSCRIPT:
@@ -483,9 +512,9 @@ OUTPUT:
         response_format: { type: 'json_object' }
       }),
     });
-    
+
     if (!response.ok) throw new Error('API error');
-    
+
     const data = await response.json();
     return JSON.parse(data.choices[0].message.content);
   } catch (error) {

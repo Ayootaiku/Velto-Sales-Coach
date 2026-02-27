@@ -5,7 +5,7 @@ export async function POST(request: Request) {
   try {
     const start = Date.now();
     const body = await request.json();
-    const { transcript, lastSpeaker } = body;
+    const { transcript, lastSpeaker, settings } = body;
 
     if (!transcript || !Array.isArray(transcript)) {
       return NextResponse.json(
@@ -31,7 +31,7 @@ export async function POST(request: Request) {
 
     // OPTIONAL: Support streaming for faster perceived performance
     if (body.stream) {
-      const stream = await generateLiveCoachingStream(validTranscript, lastSpeaker || 'prospect');
+      const stream = await generateLiveCoachingStream(validTranscript, lastSpeaker || 'prospect', settings);
       return new Response(stream, {
         headers: {
           'Content-Type': 'text/event-stream',
@@ -41,7 +41,7 @@ export async function POST(request: Request) {
       });
     }
 
-    let coaching = await generateLiveCoaching(validTranscript, lastSpeaker || 'prospect');
+    let coaching = await generateLiveCoaching(validTranscript, lastSpeaker || 'prospect', settings);
 
     // FORCE non-empty say_next for any turn
     const lastTurn = transcript[transcript.length - 1];

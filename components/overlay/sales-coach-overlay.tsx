@@ -1,7 +1,7 @@
 "use client"
 
 import React, { useState, useCallback, useEffect, useRef } from "react"
-import { X, Mic, MicOff, Terminal } from "lucide-react"
+import { X, Mic, MicOff, Terminal, Settings } from "lucide-react"
 import { cn } from "@/lib/utils"
 import type { CoachingStatus } from "./status-indicator"
 import { PresenceOrb } from "./presence-orb"
@@ -19,9 +19,33 @@ import {
   StepperItem,
   StepperSeparator,
 } from "@/components/ui/stepper"
+import { Input } from "@/components/ui/input"
+import { Label } from "@/components/ui/label"
+import { Textarea } from "@/components/ui/textarea"
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select"
+import { ScrollArea } from "@/components/ui/scroll-area"
+import { Button } from "@/components/ui/button"
+import { Slider } from "@/components/ui/slider"
 import { generateLiveCoaching, generatePostCallSummary, type TranscriptTurn } from "@/lib/salescoach-ai"
 import { processTranscriptUltraFast, type TranscriptTurn as CopilotTurn } from "@/lib/salescoach-copilot"
 import { createTurnManager } from "@/lib/turn-manager"
+
+export interface CoachSettings {
+  emotionStyle: 'Assertive' | 'Empathetic' | 'Energetic';
+  companyName: string;
+  productDescription: string;
+  targetAudience: string;
+  callType: 'Cold Call' | 'Discovery' | 'Demo' | 'Closing' | 'Follow-up';
+  primaryObjective: string;
+  keyDifferentiators: string;
+  objectionMode: 'Soft Reframe' | 'Hard Pushback' | 'Question-Based' | 'Story-Based';
+}
 
 // Helper component to handle async summary generation
 function AsyncSummaryGenerator({ generator, onClose }: { generator: () => Promise<any>, onClose: () => void }) {
@@ -83,6 +107,176 @@ function AsyncSummaryGenerator({ generator, onClose }: { generator: () => Promis
   return <CallSummary data={summaryData} onClose={onClose} />
 }
 
+function SettingsPanel({
+  settings,
+  onSave,
+  onClose
+}: {
+  settings: CoachSettings,
+  onSave: (s: CoachSettings) => void,
+  onClose: () => void
+}) {
+  const [localSettings, setLocalSettings] = useState<CoachSettings>(settings)
+
+  const emotionMap: Record<string, number> = {
+    'Empathetic': 0,
+    'Energetic': 50,
+    'Assertive': 100
+  }
+
+  const reverseEmotionMap: Record<number, CoachSettings['emotionStyle']> = {
+    0: 'Empathetic',
+    50: 'Energetic',
+    100: 'Assertive'
+  }
+
+  return (
+    <div className="absolute inset-0 z-50 bg-[#18181b] flex flex-col animate-in fade-in slide-in-from-right duration-300">
+      <div className="h-14 flex items-center justify-between px-5 border-b border-[#27272a] shrink-0">
+        <h2 className="text-sm font-bold text-white uppercase tracking-wider">Coach Settings</h2>
+        <button onClick={onClose} className="text-[#a1a1aa] hover:text-[#fafafa]">
+          <X className="w-4 h-4" />
+        </button>
+      </div>
+
+      <ScrollArea className="flex-1 p-5">
+        <div className="space-y-6 pb-20">
+          {/* Emotion Style Slider */}
+          <div className="space-y-4">
+            <div className="flex justify-between items-center">
+              <Label className="text-[10px] uppercase font-bold text-zinc-500 tracking-widest">Emotion Style</Label>
+              <span className="text-[10px] font-bold text-[#d4ff32] uppercase">{localSettings.emotionStyle}</span>
+            </div>
+            <div className="px-2">
+              <Slider
+                value={[emotionMap[localSettings.emotionStyle]]}
+                max={100}
+                step={50}
+                onValueChange={(vals) => {
+                  const val = vals[0]
+                  setLocalSettings({ ...localSettings, emotionStyle: reverseEmotionMap[val] })
+                }}
+                className="py-4"
+              />
+              <div className="flex justify-between text-[8px] text-zinc-500 uppercase font-bold px-1 mt-1">
+                <span>Empathetic</span>
+                <span>Energetic</span>
+                <span>Assertive</span>
+              </div>
+            </div>
+          </div>
+
+          {/* Company Name */}
+          <div className="space-y-2">
+            <Label className="text-[10px] uppercase font-bold text-zinc-500 tracking-widest">Company Name</Label>
+            <Input
+              value={localSettings.companyName}
+              onChange={(e) => setLocalSettings({ ...localSettings, companyName: e.target.value })}
+              placeholder="e.g. Acme Corp"
+              className="bg-[#27272a] border-[#3f3f46] text-white h-11 focus-visible:ring-[#d4ff32] focus-visible:ring-inset focus-visible:ring-2 focus-visible:ring-offset-0"
+            />
+          </div>
+
+          {/* Product/Service */}
+          <div className="space-y-2">
+            <Label className="text-[10px] uppercase font-bold text-zinc-500 tracking-widest">Product / Service</Label>
+            <Textarea
+              value={localSettings.productDescription}
+              onChange={(e) => setLocalSettings({ ...localSettings, productDescription: e.target.value })}
+              placeholder="What are you selling?"
+              className="bg-[#27272a] border-[#3f3f46] text-white min-h-[80px] focus-visible:ring-[#d4ff32] focus-visible:ring-inset focus-visible:ring-2 focus-visible:ring-offset-0"
+            />
+          </div>
+
+          {/* Target Audience */}
+          <div className="space-y-2">
+            <Label className="text-[10px] uppercase font-bold text-zinc-500 tracking-widest">Target Audience</Label>
+            <Input
+              value={localSettings.targetAudience}
+              onChange={(e) => setLocalSettings({ ...localSettings, targetAudience: e.target.value })}
+              placeholder="e.g. HR Managers"
+              className="bg-[#27272a] border-[#3f3f46] text-white h-11 focus-visible:ring-[#d4ff32] focus-visible:ring-inset focus-visible:ring-2 focus-visible:ring-offset-0"
+            />
+          </div>
+
+          {/* Call Type */}
+          <div className="space-y-2">
+            <Label className="text-[10px] uppercase font-bold text-zinc-500 tracking-widest">Call Type</Label>
+            <Select
+              value={localSettings.callType}
+              onValueChange={(v: any) => setLocalSettings({ ...localSettings, callType: v })}
+            >
+              <SelectTrigger className="bg-[#27272a] border-[#3f3f46] text-white h-11 focus:ring-[#d4ff32] focus:ring-inset focus:ring-2 focus:ring-offset-0">
+                <SelectValue placeholder="Select type" />
+              </SelectTrigger>
+              <SelectContent className="bg-[#1c1c1f] border-[#3f3f46] text-white">
+                <SelectItem value="Cold Call">Cold Call</SelectItem>
+                <SelectItem value="Discovery">Discovery</SelectItem>
+                <SelectItem value="Demo">Demo</SelectItem>
+                <SelectItem value="Closing">Closing</SelectItem>
+                <SelectItem value="Follow-up">Follow-up</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+
+          {/* Primary Objective */}
+          <div className="space-y-2">
+            <Label className="text-[10px] uppercase font-bold text-zinc-500 tracking-widest">Primary Objective</Label>
+            <Input
+              value={localSettings.primaryObjective}
+              onChange={(e) => setLocalSettings({ ...localSettings, primaryObjective: e.target.value })}
+              placeholder="e.g. Book a demo"
+              className="bg-[#27272a] border-[#3f3f46] text-white h-11 focus-visible:ring-[#d4ff32] focus-visible:ring-inset focus-visible:ring-2 focus-visible:ring-offset-0"
+            />
+          </div>
+
+          {/* Key Differentiators */}
+          <div className="space-y-2">
+            <Label className="text-[10px] uppercase font-bold text-zinc-500 tracking-widest">Key Differentiators (Bullets)</Label>
+            <Textarea
+              value={localSettings.keyDifferentiators}
+              onChange={(e) => setLocalSettings({ ...localSettings, keyDifferentiators: e.target.value })}
+              placeholder="- Built-in AI&#10;- Low cost&#10;- 24/7 Support"
+              className="bg-[#27272a] border-[#3f3f46] text-white min-h-[100px] focus-visible:ring-[#d4ff32] focus-visible:ring-inset focus-visible:ring-2 focus-visible:ring-offset-0"
+            />
+          </div>
+
+          {/* Objection Mode */}
+          <div className="space-y-2">
+            <Label className="text-[10px] uppercase font-bold text-zinc-500 tracking-widest">Objection Handling</Label>
+            <Select
+              value={localSettings.objectionMode}
+              onValueChange={(v: any) => setLocalSettings({ ...localSettings, objectionMode: v })}
+            >
+              <SelectTrigger className="bg-[#27272a] border-[#3f3f46] text-white h-11 focus:ring-[#d4ff32] focus:ring-inset focus:ring-2 focus:ring-offset-0">
+                <SelectValue placeholder="Select mode" />
+              </SelectTrigger>
+              <SelectContent className="bg-[#1c1c1f] border-[#3f3f46] text-white">
+                <SelectItem value="Soft Reframe">Soft Reframe</SelectItem>
+                <SelectItem value="Hard Pushback">Hard Pushback</SelectItem>
+                <SelectItem value="Question-Based">Question-Based</SelectItem>
+                <SelectItem value="Story-Based">Story-Based</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+        </div>
+      </ScrollArea>
+
+      <div className="p-5 border-t border-[#27272a] bg-[#18181b]/80 backdrop-blur-md shrink-0">
+        <Button
+          onClick={() => {
+            onSave(localSettings);
+            onClose();
+          }}
+          className="w-full bg-[#d4ff32] hover:bg-[#e0ff66] text-black font-bold h-12 rounded-xl"
+        >
+          Save Settings
+        </Button>
+      </div>
+    </div>
+  )
+}
+
 export function SalesCoachOverlay() {
   const [status, setStatus] = useState<CoachingStatus>("ready")
   const [isDiarized, setIsDiarized] = useState(false)
@@ -98,6 +292,34 @@ export function SalesCoachOverlay() {
   const [salespersonTag, setSalespersonTag] = useState<number | null>(null)
   const [manualSpeaker, setManualSpeaker] = useState<'salesperson' | 'prospect'>('salesperson')
   const manualSpeakerRef = useRef<'salesperson' | 'prospect'>('salesperson')
+  const [showSettings, setShowSettings] = useState(false)
+  const [settings, setSettings] = useState<CoachSettings>({
+    emotionStyle: 'Empathetic',
+    companyName: '',
+    productDescription: '',
+    targetAudience: '',
+    callType: 'Discovery',
+    primaryObjective: '',
+    keyDifferentiators: '',
+    objectionMode: 'Soft Reframe'
+  })
+
+  // Load settings on mount
+  useEffect(() => {
+    const saved = localStorage.getItem('coach_settings')
+    if (saved) {
+      try {
+        setSettings(JSON.parse(saved))
+      } catch (e) {
+        console.error('Failed to parse settings', e)
+      }
+    }
+  }, [])
+
+  // Save settings to localStorage
+  useEffect(() => {
+    localStorage.setItem('coach_settings', JSON.stringify(settings))
+  }, [settings])
 
   // Keep ref in sync for the stream callback
   useEffect(() => {
@@ -204,7 +426,9 @@ export function SalesCoachOverlay() {
         updateTrace({ B: true, lastTranscriptLen: result.text.length })
       }
 
-      handleTranscript(result.text, identifiedSpeaker)
+      if (handleTranscriptRef.current) {
+        handleTranscriptRef.current(result.text, identifiedSpeaker)
+      }
 
       // AUTO-REFRESH WATCHDOG: Restart stream on speaker turn to reset Google's 60s clock
       if (identifiedSpeaker === 'prospect') {
@@ -290,25 +514,22 @@ export function SalesCoachOverlay() {
   }, [prospectStream.isSpeaking])
 
   const runCoaching = useCallback(async (turns: TranscriptTurn[], speaker: 'salesperson' | 'prospect', force = false) => {
-    console.log(`[runCoaching] 🚀 ENTRY - speaker: ${speaker}, turns: ${turns.length}, force: ${force}`)
+    addLog(`[Trace] runCoaching Entry: speaker=${speaker}, turns=${turns.length}`)
     const startTime = Date.now()
     const lastTurn = turns[turns.length - 1]
+    const currentSessionId = isDiarized ? salespersonStream.sessionId : prospectStream.sessionId
 
     // ONLY trigger coaching for PROSPECT speech
-    // This ensures we wait for prospect to finish talking before responding
     const isProspect = speaker === 'prospect'
 
     if (!isProspect) {
-      console.log(`[runCoaching] ⏭️ SKIP - Not prospect (speaker: ${speaker})`)
-      addLog(`ℹ️ Skipping AI coaching for salesperson speech`)
+      addLog(`⏭️ Skip: Speaker is ${speaker}, not prospect`)
       return
     }
 
     // Prevent duplicate coaching requests
-    console.log(`[runCoaching] Checking isCoachingInProgress:`, isCoachingInProgressRef.current)
     if (isCoachingInProgressRef.current) {
-      console.log(`[runCoaching] ⏳ BLOCKED - Coaching already in progress!`)
-      addLog(`⏳ Coaching already in progress, skipping duplicate request`)
+      addLog(`⏳ Skip: Coaching already in progress (blocking)`)
       return
     }
 
@@ -326,7 +547,7 @@ export function SalesCoachOverlay() {
     )
 
     if (!turnCheck.shouldGenerate) {
-      addLog(`⏭️ Skipping duplicate coaching: ${turnCheck.reason}`)
+      addLog(`⏭️ Skip: TurnManager rejected (${turnCheck.reason})`)
       return
     }
 
@@ -339,8 +560,11 @@ export function SalesCoachOverlay() {
     const safetyResetTimer = setTimeout(() => {
       if (isCoachingInProgressRef.current) {
         console.warn('[runCoaching] ⚠️ Safety reset triggered after 10s - resetting isCoachingInProgress')
+        addLog(`⚠️ Coaching timeout [Turn ${nextTurnId}] - Resetting...`)
         isCoachingInProgressRef.current = false
         turnManagerRef.current.completeGeneration()
+        // Reset trace so it doesn't stay stuck on C
+        updateTrace({ C: false, turnId: nextTurnId })
       }
     }, 10000)
 
@@ -369,7 +593,7 @@ export function SalesCoachOverlay() {
             type: 'reframe'
           }]);
         }
-      }).then(result => {
+      }, settings).then(result => {
         // Clear timeout if API responds successfully
         if (timeoutId) {
           clearTimeout(timeoutId)
@@ -430,7 +654,6 @@ export function SalesCoachOverlay() {
       updateTrace({ E: true, cardId: streamingCardId })
 
       // AUTO-START NEW STREAM: Now that AI has responded, start a fresh prospect stream
-      // This is identical to clicking the 'Start' button for the prospect
       console.log(`[Prospect AI Response] 🔄 Turn complete. Starting NEW prospect stream...`)
       if (isDiarized) {
         // Force Hardware Reset after AI card to ensure clean state
@@ -481,25 +704,18 @@ export function SalesCoachOverlay() {
       console.log(`[Prospect AI Error] 🔄 Error turn complete. Starting NEW prospect stream...`)
       prospectStream.startAutomatic()
     }
-  }, [addLog, prospectStream.isConnected, prospectStream.isStreaming, updateTrace, salespersonStream])
+  }, [addLog, prospectStream.isConnected, prospectStream.isStreaming, updateTrace, salespersonStream, trace.turnId, prospectStream.sessionId, isDiarized])
 
   const handleTranscript = useCallback((text: string, speaker: 'salesperson' | 'prospect' = 'salesperson') => {
-
     if (!text || text.trim().length === 0) {
       return
     }
 
     addLog(`🎯 SPEECH END detected for ${speaker}: "${text.substring(0, 30)}..."`)
 
-    const turn: TranscriptTurn = {
-      speaker,
-      text,
-      timestamp: new Date().toISOString()
-    }
+    const turn: TranscriptTurn = { speaker, text, timestamp: new Date().toISOString() }
     transcriptTurnsRef.current.push(turn)
 
-    // Only trigger AI coaching when PROSPECT finishes speaking
-    // This ensures the AI responds to what the prospect actually said
     if (speaker === 'prospect') {
       addLog(`⚡ TRIGGERING AI COACHING for prospect speech`)
       runCoaching([...transcriptTurnsRef.current], speaker)
@@ -512,6 +728,29 @@ export function SalesCoachOverlay() {
   useEffect(() => {
     handleTranscriptRef.current = handleTranscript
   }, [handleTranscript])
+
+  // PROGRESSIVE COACHING: Trigger after 1.2s of silence even if no 'final' from STT
+  // This fixes the "no-response" bug when STT doesn't finalize
+  useEffect(() => {
+    // In diarized mode, we look at the salesperson stream (which captures everyone)
+    // Otherwise, we look at the prospect stream
+    const activeStream = isDiarized ? salespersonStream : prospectStream
+    const activePartial = isDiarized ? salespersonStream.lastPartial : prospectStream.lastPartial
+
+    // Only trigger if we definitely aren't speaking anymore
+    if (!activeStream.isSpeaking && activePartial && !isCoachingInProgressRef.current) {
+      // Heuristic: If manual speaker is prospect, or we are in dual stream mode
+      const likelyProspect = !isDiarized || manualSpeaker === 'prospect'
+      if (!likelyProspect) return
+
+      const timer = setTimeout(() => {
+        addLog(`⏱️ SILENCE WATCHDOG: Triggering coaching for non-final transcript`)
+        handleTranscript(activePartial.text, 'prospect')
+      }, 400)
+      return () => clearTimeout(timer)
+    }
+  }, [prospectStream.isSpeaking, prospectStream.lastPartial, salespersonStream.isSpeaking, salespersonStream.lastPartial, isDiarized, manualSpeaker, handleTranscript, addLog])
+
 
   // Track transcripts for display/storage (but don't trigger coaching from here)
   // Coaching is only triggered via onSpeechEnd callback for prospect stream
@@ -576,16 +815,16 @@ export function SalesCoachOverlay() {
       isFinal: false,
     }
 
-    const instantDraft = processTranscriptUltraFast(currentTurn, previousTurns)
-    if (!instantDraft) return
+    const copilotResponse = processTranscriptUltraFast(currentTurn, previousTurns, settings);
+    if (!copilotResponse) return
 
     partialDraftShownRef.current = true
     addLog(`⚡ Instant coaching from partial prospect speech`)
 
     setCards([{
       id: `draft-${Date.now()}`,
-      suggestion: instantDraft.say_next,
-      reason: `${instantDraft.insight} (draft)`,
+      suggestion: copilotResponse.say_next,
+      reason: `${copilotResponse.insight} (draft)`,
       type: 'reframe'
     }])
   }, [prospectStream.lastPartial, prospectStream.isSpeaking, status, isPaused, addLog])
@@ -841,7 +1080,7 @@ export function SalesCoachOverlay() {
   if (isCompact) return <CompactOverlay status={status} onExpand={() => setIsCompact(false)} />
 
   return (
-    <div className="bg-[#18181b] border border-[#27272a] shadow-2xl w-[360px] rounded-[1.5rem] overflow-hidden flex flex-col transition-all duration-500">
+    <div className="relative bg-[#18181b] border border-[#27272a] shadow-2xl w-[360px] rounded-[1.5rem] overflow-hidden flex flex-col transition-all duration-500">
       {/* Header */}
       <div className="h-14 flex items-center justify-between px-5 bg-[#18181b] shrink-0">
         <div className="flex items-center gap-2.5">
@@ -851,7 +1090,13 @@ export function SalesCoachOverlay() {
             <span className="text-[10px] text-[#a1a1aa] font-mono bg-[#27272a] px-2 py-0.5 rounded-full border border-[#3f3f46]">{formatTime(callTime)}</span>
           )}
         </div>
-        <div className="flex items-center gap-4">
+        <div className="flex items-center gap-1.5">
+          <button
+            onClick={() => setShowSettings(true)}
+            className="text-[#a1a1aa] hover:text-[#d4ff32] transition-colors p-1 rounded-full hover:bg-[#27272a]"
+          >
+            <Settings className="w-4 h-4" />
+          </button>
           {/* Enhanced 5-Stage Pipeline Stepper */}
           <button onClick={() => setIsCompact(true)} className="text-[#a1a1aa] hover:text-[#fafafa] transition-colors p-1 rounded-full hover:bg-[#27272a]">
             <X className="w-4 h-4" />
@@ -893,8 +1138,11 @@ export function SalesCoachOverlay() {
 
         {(status === "listening" || status === "coaching") && (
           <div className="flex flex-col p-5 gap-6 flex-1">
-            <div className="h-24 flex items-center justify-center shrink-0">
-              <PresenceOrb state={status === "coaching" ? "active" : "listening"} />
+            <div className="flex items-center justify-center shrink-0 min-h-[120px]">
+              <PresenceOrb
+                state={(trace.C || trace.D || trace.E) ? "active" : (status === "coaching" ? "active" : "listening")}
+                label={(trace.C || trace.D || trace.E) ? "Thinking" : "Listening"}
+              />
             </div>
 
             {/* In-Room Mode: Manual Speaker Switcher */}
@@ -991,6 +1239,14 @@ export function SalesCoachOverlay() {
             </div>
           </div>
         </div>
+      )}
+
+      {showSettings && (
+        <SettingsPanel
+          settings={settings}
+          onSave={setSettings}
+          onClose={() => setShowSettings(false)}
+        />
       )}
     </div>
   )

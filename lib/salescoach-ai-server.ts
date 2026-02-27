@@ -16,6 +16,17 @@ export type Stage = 'Greeting' | 'Rapport' | 'Discovery' | 'Pain' | 'Impact' | '
 
 export type ObjectionType = 'Price' | 'Timing' | 'Trust' | 'Authority' | 'Need' | 'Competition';
 
+export interface CoachSettings {
+  emotionStyle: 'Assertive' | 'Empathetic' | 'Energetic';
+  companyName: string;
+  productDescription: string;
+  targetAudience: string;
+  callType: 'Cold Call' | 'Discovery' | 'Demo' | 'Closing' | 'Follow-up';
+  primaryObjective: string;
+  keyDifferentiators: string;
+  objectionMode: 'Soft Reframe' | 'Hard Pushback' | 'Question-Based' | 'Story-Based';
+}
+
 interface CoachingSuggestion {
   speaker: 'Prospect' | 'Salesperson' | 'Unclear';
   stage: Stage;
@@ -47,7 +58,8 @@ function withTimeout<T>(promise: Promise<T>, ms: number, fallback: T): Promise<T
 
 export async function generateLiveCoaching(
   recentTranscript: TranscriptTurn[],
-  lastSpeaker: 'salesperson' | 'prospect'
+  lastSpeaker: 'salesperson' | 'prospect',
+  settings?: CoachSettings
 ): Promise<CoachingSuggestion> {
   const startTime = Date.now();
   const lastTurn = recentTranscript[recentTranscript.length - 1];
@@ -96,22 +108,53 @@ export async function generateLiveCoaching(
 
 
   try {
+    // Customize style based on settings
+    let styleInstruction = "";
+    if (settings) {
+      if (settings.emotionStyle === 'Assertive') {
+        styleInstruction = "STYLE: Confident, direct, decisive. Push forward, always ask for commitment/next step. Challenge vague objections with clarity. Zero fluff.";
+      } else if (settings.emotionStyle === 'Empathetic') {
+        styleInstruction = "STYLE: Validate the prospect's feeling first, then explore. Use curiosity-led questions. Slower pace, heavy trust-building. Gentle framing.";
+      } else if (settings.emotionStyle === 'Energetic') {
+        styleInstruction = "STYLE: Upbeat, extremely positive, high momentum. Create urgency without being pushy. Emphasize upside and future opportunity. Keep it crisp.";
+      }
+
+      if (settings.objectionMode === 'Soft Reframe') {
+        styleInstruction += " OBJECTION HANDLING: Use Soft Reframe (agree and redirect).";
+      } else if (settings.objectionMode === 'Hard Pushback') {
+        styleInstruction += " OBJECTION HANDLING: Use Hard Pushback (challenge the premise directly).";
+      } else if (settings.objectionMode === 'Question-Based') {
+        styleInstruction += " OBJECTION HANDLING: Use Question-Based (answer every objection with a deeper discovery question).";
+      } else if (settings.objectionMode === 'Story-Based') {
+        styleInstruction += " OBJECTION HANDLING: Use Story-Based (respond with a short 1-sentence analogy or success story).";
+      }
+    }
+
+    const systemContent = `Expert sales coach. Categorize into one of 15 stages: Greeting, Rapport, Discovery, Pain, Impact, Qualification, Value, Confusion, Comparison, Objection, Hesitation, Buy-Signal, Close, Logistics, Stall.
+Provide deep, strategic tactical advice. ALWAYS provide a detailed 'insight' (at least 2 sentences) explaining the psychological reason WHY this response is the most effective.
+${settings?.companyName ? `COMPANY: ${settings.companyName}` : ''}
+${settings?.productDescription ? `PRODUCT/SERVICE: ${settings.productDescription}` : ''}
+${settings?.targetAudience ? `TARGET AUDIENCE: ${settings.targetAudience}` : ''}
+${settings?.callType ? `CALL TYPE: ${settings.callType}` : ''}
+${settings?.primaryObjective ? `PRIMARY OBJECTIVE: ${settings.primaryObjective}` : ''}
+${settings?.keyDifferentiators ? `KEY DIFFERENTIATORS: ${settings.keyDifferentiators}` : ''}
+${styleInstruction}
+JSON: {speaker, stage, objection_type, say_next, insight, confidence}`;
+
     // Prepare the request payload
     const requestPayload = {
       model: OPENAI_MODEL,
       messages: [
         {
           role: 'system',
-          content: `Expert sales coach. Categorize into one of 15 stages: Greeting, Rapport, Discovery, Pain, Impact, Qualification, Value, Confusion, Comparison, Objection, Hesitation, Buy-Signal, Close, Logistics, Stall.
-Provide deep, strategic tactical advice. ALWAYS provide a detailed 'insight' (at least 2 sentences) explaining the psychological reason WHY this response is the most effective.
-JSON: {speaker, stage, objection_type, say_next, insight, confidence}`
+          content: systemContent
         },
         {
           role: 'user',
           content: `TRANSCRIPT:\n${transcriptText}\n\nWhat should the salesperson say next? Identify the stage and provide the exact words to speak.`
         },
       ],
-      temperature: 0.4, // Increased from 0.1 to allow for more natural, varied responses
+      temperature: 0.4,
       max_tokens: 300,
       response_format: { type: 'json_object' },
     };
@@ -211,7 +254,8 @@ JSON: {speaker, stage, objection_type, say_next, insight, confidence}`
  */
 export async function generateLiveCoachingStream(
   recentTranscript: TranscriptTurn[],
-  lastSpeaker: 'salesperson' | 'prospect'
+  lastSpeaker: 'salesperson' | 'prospect',
+  settings?: CoachSettings
 ) {
   if (!OPENAI_API_KEY) {
     throw new Error('Streaming failed: API Key missing');
@@ -225,19 +269,50 @@ export async function generateLiveCoachingStream(
     ? validTurns.map(t => `${t.speaker.toUpperCase()}: "${t.text}"`).join('\n')
     : 'No transcript available yet.';
 
-  const requestPayload = {
-    model: OPENAI_MODEL,
-    messages: [
-      {
-        role: 'system',
-        content: `Expert sales coach. Categorize into one of 15 stages: Greeting, Rapport, Discovery, Pain, Impact, Qualification, Value, Confusion, Comparison, Objection, Hesitation, Buy-Signal, Close, Logistics, Stall.
+  // Customize style based on settings
+  let styleInstruction = "";
+  if (settings) {
+    if (settings.emotionStyle === 'Assertive') {
+      styleInstruction = "STYLE: Confident, direct, decisive. Push forward, always ask for commitment/next step. Challenge vague objections with clarity. Zero fluff.";
+    } else if (settings.emotionStyle === 'Empathetic') {
+      styleInstruction = "STYLE: Validate the prospect's feeling first, then explore. Use curiosity-led questions. Slower pace, heavy trust-building. Gentle framing.";
+    } else if (settings.emotionStyle === 'Energetic') {
+      styleInstruction = "STYLE: Upbeat, extremely positive, high momentum. Create urgency without being pushy. Emphasize upside and future opportunity. Keep it crisp.";
+    }
+
+    if (settings.objectionMode === 'Soft Reframe') {
+      styleInstruction += " OBJECTION HANDLING: Use Soft Reframe (agree and redirect).";
+    } else if (settings.objectionMode === 'Hard Pushback') {
+      styleInstruction += " OBJECTION HANDLING: Use Hard Pushback (challenge the premise directly).";
+    } else if (settings.objectionMode === 'Question-Based') {
+      styleInstruction += " OBJECTION HANDLING: Use Question-Based (answer every objection with a deeper discovery question).";
+    } else if (settings.objectionMode === 'Story-Based') {
+      styleInstruction += " OBJECTION HANDLING: Use Story-Based (respond with a short 1-sentence analogy or success story).";
+    }
+  }
+
+  const systemContent = `Expert sales coach. Categorize into one of 15 stages: Greeting, Rapport, Discovery, Pain, Impact, Qualification, Value, Confusion, Comparison, Objection, Hesitation, Buy-Signal, Close, Logistics, Stall.
 Provide deep, strategic advice. 
+${settings?.companyName ? `COMPANY: ${settings.companyName}` : ''}
+${settings?.productDescription ? `PRODUCT/SERVICE: ${settings.productDescription}` : ''}
+${settings?.targetAudience ? `TARGET AUDIENCE: ${settings.targetAudience}` : ''}
+${settings?.callType ? `CALL TYPE: ${settings.callType}` : ''}
+${settings?.primaryObjective ? `PRIMARY OBJECTIVE: ${settings.primaryObjective}` : ''}
+${settings?.keyDifferentiators ? `KEY DIFFERENTIATORS: ${settings.keyDifferentiators}` : ''}
+${styleInstruction}
 IMPORTANT: Your 'INSIGHT' must be at least 25 words or two full sentences explaining the tactical edge of your advice.
 DO NOT wrap your response in quotes.
 FORMAT YOUR RESPONSE EXACTLY LIKE THIS (include the labels):
 STAGE: [Stage Name]
 INSIGHT: [A detailed strategic reasoning explaining WHY this response is the most tactical choice here. Focus on psychological impact. At least 2 sentences.]
-SAY_NEXT: [The exact words to speak]`
+SAY_NEXT: [The exact words to speak]`;
+
+  const requestPayload = {
+    model: OPENAI_MODEL,
+    messages: [
+      {
+        role: 'system',
+        content: systemContent
       },
       {
         role: 'user',

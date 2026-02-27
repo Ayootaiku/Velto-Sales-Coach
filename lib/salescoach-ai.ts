@@ -55,7 +55,8 @@ interface PostCallSummary {
 export async function generateLiveCoaching(
   recentTranscript: TranscriptTurn[],
   lastSpeaker: 'salesperson' | 'prospect',
-  onUpdate?: (partial: Partial<CoachingSuggestion>) => void
+  onUpdate?: (partial: Partial<CoachingSuggestion>) => void,
+  settings?: any
 ): Promise<CoachingSuggestion> {
   const isProspect = lastSpeaker === 'prospect';
   const shouldStream = !!onUpdate;
@@ -71,7 +72,8 @@ export async function generateLiveCoaching(
       body: JSON.stringify({
         transcript: recentTranscript,
         lastSpeaker,
-        stream: shouldStream
+        stream: shouldStream,
+        settings
       }),
     });
 
@@ -96,34 +98,35 @@ export async function generateLiveCoaching(
 
       while (true) {
         const { done, value } = await reader.read();
-        if (done) break;
 
-        const chunk = decoder.decode(value, { stream: true });
+        const chunk = decoder.decode(value || new Uint8Array(), { stream: !done });
         const lines = chunk.split('\n');
 
+        let shouldBreak = false;
         for (const line of lines) {
-          if (line.startsWith('data: ')) {
-            const dataStr = line.slice(6).trim();
-            if (dataStr === '[DONE]') break;
+          const trimmedLine = line.trim();
+          if (trimmedLine === 'data: [DONE]') {
+            shouldBreak = true;
+            break;
+          }
 
+          if (trimmedLine.startsWith('data: ')) {
+            const dataStr = trimmedLine.slice(6).trim();
             try {
               const data = JSON.parse(dataStr);
               const content = data.choices[0]?.delta?.content || '';
               fullText += content;
 
               // Parse custom format: STAGE: [stage] INSIGHT: [insight] SAY_NEXT: [words]
-              // IMPROVED: Use a more robust split-based parser for streaming safety
               const cleanText = fullText.trim();
 
-              // Helper to clean up values (strip quotes, trim, remove redundant labels)
+              // Helper to clean up values
               const cleanupValue = (val: string) => {
                 let cleaned = val.trim();
-                // Remove surrounding quotes if present
                 if ((cleaned.startsWith('"') && cleaned.endsWith('"')) ||
                   (cleaned.startsWith("'") && cleaned.endsWith("'"))) {
                   cleaned = cleaned.slice(1, -1).trim();
                 }
-                // Strip labels if they accidentally leaked in
                 cleaned = cleaned.replace(/^(INSIGHT:|SAY_NEXT:|STAGE:)\s*/i, '');
                 return cleaned;
               };
@@ -149,13 +152,14 @@ export async function generateLiveCoaching(
                 }
               }
 
-              // Fire update for any change to provide immediate "typing" feel
               onUpdate(result);
             } catch (e) {
-              // Ignore partial JSON parse errors
+              // Ignore partial JSON
             }
           }
         }
+
+        if (done || shouldBreak) break;
       }
       return result;
     }
