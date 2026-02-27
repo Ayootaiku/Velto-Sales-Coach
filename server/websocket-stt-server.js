@@ -11,11 +11,17 @@ const fs = require('fs');
 const path = require('path');
 const dotenv = require('dotenv');
 
-// Load environment variables
 dotenv.config({ path: '.env.local' });
 
-// Auto-discover available port (3002-3010)
-const DEFAULT_PORT = parseInt(process.env.WS_PORT) || 3002;
+// Railway/Cloud: Load Google credentials from env var if no local file exists
+if (process.env.GOOGLE_APPLICATION_CREDENTIALS_JSON && !fs.existsSync(process.env.GOOGLE_APPLICATION_CREDENTIALS || '')) {
+  const credPath = path.join(require('os').tmpdir(), 'gcloud-creds.json');
+  fs.writeFileSync(credPath, process.env.GOOGLE_APPLICATION_CREDENTIALS_JSON);
+  process.env.GOOGLE_APPLICATION_CREDENTIALS = credPath;
+  console.log('[WS Server] Loaded Google credentials from GOOGLE_APPLICATION_CREDENTIALS_JSON env var');
+}
+
+const DEFAULT_PORT = parseInt(process.env.PORT) || parseInt(process.env.WS_PORT) || 3002;
 const PORT_RANGE_START = 3002;
 const PORT_RANGE_END = 3010;
 

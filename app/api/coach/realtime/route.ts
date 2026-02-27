@@ -9,9 +9,9 @@ import {
 } from '@/lib/salescoach-copilot';
 import { createClient } from '@supabase/supabase-js';
 
-const supabaseUrl = process.env.SUPABASE_URL!;
-const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY!;
-const supabase = createClient(supabaseUrl, supabaseKey);
+const supabaseUrl = process.env.SUPABASE_URL || '';
+const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY || '';
+const supabase = supabaseUrl && supabaseKey ? createClient(supabaseUrl, supabaseKey) : null;
 
 /**
  * POST /api/coach/realtime
@@ -69,8 +69,7 @@ export async function POST(request: Request) {
       });
     }
 
-    // Store in background (fire and forget)
-    if (callId) {
+    if (callId && supabase) {
       void supabase.from('transcripts').insert({
         call_id: callId,
         speaker: turn.speaker,

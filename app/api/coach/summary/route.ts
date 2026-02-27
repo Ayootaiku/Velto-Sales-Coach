@@ -2,9 +2,19 @@ import { NextResponse } from 'next/server';
 import { generatePostCallSummary } from '@/lib/salescoach-ai-server';
 import { createClient } from '@supabase/supabase-js';
 
-const supabaseUrl = process.env.SUPABASE_URL!;
-const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY!;
-const supabase = createClient(supabaseUrl, supabaseKey);
+const CORS_HEADERS = {
+  'Access-Control-Allow-Origin': '*',
+  'Access-Control-Allow-Methods': 'POST, OPTIONS',
+  'Access-Control-Allow-Headers': 'Content-Type',
+};
+
+export async function OPTIONS() {
+  return new Response(null, { status: 204, headers: CORS_HEADERS });
+}
+
+const supabaseUrl = process.env.SUPABASE_URL || '';
+const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY || '';
+const supabase = supabaseUrl && supabaseKey ? createClient(supabaseUrl, supabaseKey) : null;
 
 interface TranscriptTurn {
   speaker: 'salesperson' | 'prospect';
@@ -57,10 +67,9 @@ export async function POST(request: Request) {
 
     const { callId, transcripts } = body;
 
-    // MANDATORY ENTRY GUARD
     if (!transcripts || !Array.isArray(transcripts) || transcripts.length === 0) {
-      console.log('[Summary API] 🛡️ Guard triggered: Empty transcript');
-      return NextResponse.json(createSafeFallback());
+      console.log('[Summary API] Guard: Empty transcript');
+      return NextResponse.json(createSafeFallback(), { headers: CORS_HEADERS });
     }
 
     // Generate summary using AI with timeout
@@ -91,8 +100,7 @@ export async function POST(request: Request) {
       summary_quality_score: summary?.salesperson_performance?.control_score * 10 || 50
     };
 
-    // Store summary in Supabase if we have a callId (best effort - don't fail if this errors)
-    if (callId) {
+    if (callId && supabase) {
       try {
         const { error: summaryError } = await supabase
           .from('summaries')
@@ -129,11 +137,10 @@ export async function POST(request: Request) {
       }
     }
 
-    // RETURN THE FULL RICH SUMMARY FOR THE FRONTEND
-    return NextResponse.json(summary);
+    return NextResponse.json(summary, { headers: CORS_HEADERS });
 
   } catch (error: any) {
     console.error('[Summary API Error]', error);
-    return NextResponse.json(createSafeFallback());
+    return NextResponse.json(createSafeFallback(), { headers: CORS_HEADERS });
   }
 }

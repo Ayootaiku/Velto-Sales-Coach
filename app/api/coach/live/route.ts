@@ -1,6 +1,16 @@
 import { NextResponse } from 'next/server';
 import { generateLiveCoaching, generateLiveCoachingStream } from '@/lib/salescoach-ai-server';
 
+const CORS_HEADERS = {
+  'Access-Control-Allow-Origin': '*',
+  'Access-Control-Allow-Methods': 'POST, OPTIONS',
+  'Access-Control-Allow-Headers': 'Content-Type',
+};
+
+export async function OPTIONS() {
+  return new Response(null, { status: 204, headers: CORS_HEADERS });
+}
+
 export async function POST(request: Request) {
   try {
     const start = Date.now();
@@ -29,11 +39,11 @@ export async function POST(request: Request) {
       });
     }
 
-    // OPTIONAL: Support streaming for faster perceived performance
     if (body.stream) {
       const stream = await generateLiveCoachingStream(validTranscript, lastSpeaker || 'prospect', settings);
       return new Response(stream, {
         headers: {
+          ...CORS_HEADERS,
           'Content-Type': 'text/event-stream',
           'Cache-Control': 'no-cache',
           'Connection': 'keep-alive',
@@ -59,12 +69,12 @@ export async function POST(request: Request) {
     }
 
 
-    return NextResponse.json(coaching);
+    return NextResponse.json(coaching, { headers: CORS_HEADERS });
   } catch (error: any) {
     console.error('[Live Coaching API Error]', error);
     return NextResponse.json(
       { error: error.message || 'Failed to generate coaching' },
-      { status: 500 }
+      { status: 500, headers: CORS_HEADERS }
     );
   }
 }
