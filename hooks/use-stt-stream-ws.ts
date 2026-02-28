@@ -302,7 +302,7 @@ export function useSTTStream(
         setIsConnected(false)
 
         // Auto-reconnect logic: use a fresh session ID so the server gets a clean session
-        if (isStreaming && reconnectAttemptsRef.current < MAX_RECONNECT_ATTEMPTS) {
+        if (isStreamingRef.current && reconnectAttemptsRef.current < MAX_RECONNECT_ATTEMPTS) {
           reconnectAttemptsRef.current++
 
           setTimeout(async () => {
