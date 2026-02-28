@@ -79,6 +79,9 @@ export function useSTTStream(
   const onSpeechEndRef = useRef(onSpeechEnd)
   const onSpeakerTurnRef = useRef(onSpeakerTurn)
   const isDiarizedRef = useRef(false)
+  const wsMessageHandlerRef = useRef<((event: MessageEvent) => void) | null>(null)
+  const wsCloseHandlerRef = useRef<(() => void) | null>(null)
+  const reconnectWebSocketOnlyRef = useRef<(() => void) | null>(null)
 
   // DEDUPLICATION: Track server-finalized text to prevent double finalization
   const serverFinalizedTextRef = useRef<string>('')
@@ -167,6 +170,36 @@ export function useSTTStream(
     throw lastError || new Error('WebSocket connection failed - server may not be running')
   }, [])
 
+  // Shared reconnect logic: new session, new WS, re-attach handlers (used by onclose and by reconnectWebSocketOnly)
+  const runReconnect = useCallback(async () => {
+    const speaker = speakerRef.current
+    if (!speaker || !streamRef.current) return
+    try {
+      const newSessionIdForReconnect = `${speaker}-${Date.now()}-${Math.random().toString(36).substring(2, 8)}`
+      sessionIdRef.current = newSessionIdForReconnect
+      const newWs = await connectWebSocket(speaker, newSessionIdForReconnect, isDiarizedRef.current)
+      wsRef.current = newWs
+      setIsConnected(true)
+      if (wsMessageHandlerRef.current) newWs.onmessage = wsMessageHandlerRef.current
+      if (wsCloseHandlerRef.current) newWs.onclose = wsCloseHandlerRef.current
+    } catch (err) {
+      console.error(`[WS STT ${speaker}] ❌ Reconnect failed:`, err)
+      if (reconnectAttemptsRef.current >= MAX_RECONNECT_ATTEMPTS) {
+        setIsStreaming(false)
+        setError('WebSocket connection lost. Please restart session.')
+      }
+    }
+  }, [connectWebSocket])
+
+  // WebSocket-only reconnect: keep audio pipeline and intervals, only replace the socket (used by silent buffer and no-audio watchdogs)
+  const reconnectWebSocketOnly = useCallback(() => {
+    if (!wsRef.current || !streamRef.current || !speakerRef.current) return
+    wsRef.current.onclose = null
+    wsRef.current.close()
+    wsRef.current = null
+    reconnectAttemptsRef.current = 0
+    void runReconnect()
+  }, [runReconnect])
 
   const startStream = useCallback(async (speaker: 'salesperson' | 'prospect', audioStream?: MediaStream, diarize = false) => {
     try {
@@ -216,7 +249,7 @@ export function useSTTStream(
       setIsConnected(true)
       setError(null)
 
-      ws.onmessage = (event) => {
+      const messageHandler = (event: MessageEvent) => {
         try {
           const data = JSON.parse(event.data)
 
@@ -295,8 +328,10 @@ export function useSTTStream(
           console.error('[WS STT] Error parsing message:', e)
         }
       }
+      wsMessageHandlerRef.current = messageHandler
+      ws.onmessage = messageHandler
 
-      ws.onclose = () => {
+      const closeHandler = () => {
         // TRACE E: sttStreamEnded (WebSocket close)
         console.log(`[TRACE-E] ${speaker} - WebSocket CLOSED (finals received: ${transcriptCountRef.current})`)
         setIsConnected(false)
@@ -304,28 +339,11 @@ export function useSTTStream(
         // Auto-reconnect logic: use a fresh session ID so the server gets a clean session
         if (isStreamingRef.current && reconnectAttemptsRef.current < MAX_RECONNECT_ATTEMPTS) {
           reconnectAttemptsRef.current++
-
-          setTimeout(async () => {
-            try {
-              if (!streamRef.current) return
-              const newSessionIdForReconnect = `${speaker}-${Date.now()}-${Math.random().toString(36).substring(2, 8)}`
-              sessionIdRef.current = newSessionIdForReconnect
-              const newWs = await connectWebSocket(speaker, newSessionIdForReconnect, isDiarizedRef.current)
-              wsRef.current = newWs
-              setIsConnected(true)
-
-              // Re-attach message handler so TRACE-B/C/D continue after reconnect
-              newWs.onmessage = ws.onmessage
-            } catch (err) {
-              console.error(`[WS STT ${speaker}] ❌ Reconnect failed:`, err)
-              if (reconnectAttemptsRef.current >= MAX_RECONNECT_ATTEMPTS) {
-                setIsStreaming(false)
-                setError('WebSocket connection lost. Please restart session.')
-              }
-            }
-          }, 1000 * reconnectAttemptsRef.current) // Exponential backoff: 1s, 2s, 3s
+          setTimeout(() => { void runReconnect() }, 1000 * reconnectAttemptsRef.current) // Exponential backoff
         }
       }
+      wsCloseHandlerRef.current = closeHandler
+      ws.onclose = closeHandler
 
       // Set up Web Audio API for PCM capture
       // 1. Recycle existing AudioContext if possible (must be NOT closed)
@@ -392,9 +410,9 @@ export function useSTTStream(
 
         // Detect silent buffer bug: If RMS is exactly 0 for 4 seconds, the browser audio stack is stuck
         if (now - lastActiveTimeRef.current > 4000 && isStreamingRef.current) {
-          console.warn(`[SILENT BUFFER BUG] ${speaker} - Buffer is 0.0000. FORCING HARDWARE RESET...`)
+          console.warn(`[SILENT BUFFER BUG] ${speaker} - Buffer is 0.0000. Reconnecting WebSocket only...`)
           lastActiveTimeRef.current = now // Prevent loop
-          startAutomatic()
+          reconnectWebSocketOnlyRef.current?.()
           return
         }
 
@@ -466,8 +484,8 @@ export function useSTTStream(
         const timeSinceLastAudio = now - lastAudioProcessTimeRef.current
 
         if (isStreamingRef.current && timeSinceLastAudio > 5000) {
-          console.warn(`[WATCHDOG] ${speaker} - 🔥 NO AUDIO CAPTURE FOR ${timeSinceLastAudio}ms. FORCE RESTARTING...`)
-          startAutomatic()
+          console.warn(`[WATCHDOG] ${speaker} - 🔥 NO AUDIO CAPTURE FOR ${timeSinceLastAudio}ms. Reconnecting WebSocket only...`)
+          reconnectWebSocketOnlyRef.current?.()
         }
       }, 2000)
 
@@ -487,7 +505,7 @@ export function useSTTStream(
       console.error(`[WS STT ${speaker}] ❌ Error starting stream:`, err)
       setError(err instanceof Error ? err.message : 'Failed to start stream')
     }
-  }, [connectWebSocket, resampleAudio, calculateRMS]) // Removed isStreaming dependency
+  }, [connectWebSocket, resampleAudio, calculateRMS, runReconnect])
 
   const stopStream = useCallback(async (keepTracks = false) => {
     if (isStoppingRef.current) return
@@ -604,6 +622,10 @@ export function useSTTStream(
     document.addEventListener('visibilitychange', onVisibilityChange)
     return () => document.removeEventListener('visibilitychange', onVisibilityChange)
   }, [])
+
+  useEffect(() => {
+    reconnectWebSocketOnlyRef.current = reconnectWebSocketOnly
+  }, [reconnectWebSocketOnly])
 
   return {
     isConnected,
