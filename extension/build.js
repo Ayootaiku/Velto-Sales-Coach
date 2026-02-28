@@ -13,6 +13,11 @@ fs.copyFileSync(
   path.resolve(distDir, 'manifest.json')
 );
 
+fs.copyFileSync(
+  path.resolve(__dirname, 'orb-window.html'),
+  path.resolve(distDir, 'orb-window.html')
+);
+
 const sourceIcons = path.resolve(__dirname, 'icons');
 if (fs.existsSync(sourceIcons)) {
   for (const file of fs.readdirSync(sourceIcons)) {

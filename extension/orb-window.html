@@ -1,0 +1,80 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Velto Orb</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    html, body {
+      width: 100%;
+      height: 100%;
+      background: transparent;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-family: system-ui, -apple-system, sans-serif;
+    }
+    .velto-fab {
+      width: 52px;
+      height: 52px;
+      border-radius: 50%;
+      background: linear-gradient(135deg, #18181b 0%, #27272a 100%);
+      border: 2px solid #3f3f46;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      box-shadow: 0 8px 32px rgba(0,0,0,0.5);
+      transition: all 0.3s ease;
+      position: relative;
+    }
+    .velto-fab:hover {
+      border-color: #d4ff32;
+      transform: scale(1.08);
+      box-shadow: 0 8px 32px rgba(212,255,50,0.15);
+    }
+    .velto-fab::after {
+      content: '';
+      width: 18px;
+      height: 18px;
+      border-radius: 50%;
+      background: radial-gradient(circle, #d4ff32 0%, #a3cc00 100%);
+      box-shadow: 0 0 12px rgba(212,255,50,0.4);
+    }
+    .velto-toast {
+      position: fixed;
+      bottom: 60px;
+      left: 50%;
+      transform: translateX(-50%);
+      max-width: 220px;
+      padding: 10px 14px;
+      background: #27272a;
+      border: 1px solid #3f3f46;
+      border-radius: 10px;
+      color: #fafafa;
+      font-size: 12px;
+      line-height: 1.4;
+      box-shadow: 0 8px 24px rgba(0,0,0,0.4);
+      z-index: 10;
+      animation: velto-toast-in 0.2s ease-out;
+    }
+    @keyframes velto-toast-in {
+      from { opacity: 0; transform: translate(-50%, 6px); }
+      to { opacity: 1; transform: translate(-50%, 0); }
+    }
+  </style>
+</head>
+<body>
+  <button type="button" class="velto-fab" title="Open Velto Sales Coach" id="fab"></button>
+  <script>
+    document.getElementById('fab').addEventListener('click', function () {
+      var toast = document.createElement('div');
+      toast.className = 'velto-toast';
+      toast.textContent = 'Click the Velto icon in the toolbar to open.';
+      document.body.appendChild(toast);
+      setTimeout(function () { toast.remove(); }, 3000);
+    });
+  </script>
+</body>
+</html>
