@@ -40,11 +40,11 @@ function getSpeechClient() {
   return globalSpeechClient;
 }
 
-function closeSession(ws) {
+function closeSession(ws, reason) {
   const session = sessions.get(ws);
   if (session) {
     try { session.stream?.end(); } catch (e) { /* ignore */ }
-    console.log(`[STT] Session closed: ${session.sessionId}`);
+    console.log(`[STT] Session closed: ${session.sessionId} (reason: ${reason || 'unknown'})`);
     sessions.delete(ws);
   }
   if (ws.readyState === WebSocket.OPEN) ws.close();
@@ -86,11 +86,11 @@ function handleSTTConnection(ws, req) {
     const stream = client
       .streamingRecognize({ config, interimResults: true, singleUtterance: false })
       .on('error', (error) => {
-        console.error(`[STT Error ${sessionId}]`, error.message);
+        console.error(`[STT Error ${sessionId}] stream error:`, error.message, error.code || '', error.details || '');
         if (ws.readyState === WebSocket.OPEN) {
           ws.send(JSON.stringify({ type: 'error', message: error.message }));
         }
-        closeSession(ws);
+        closeSession(ws, 'stream error');
       })
       .on('data', (data) => {
         const session = sessions.get(ws);
@@ -119,8 +119,8 @@ function handleSTTConnection(ws, req) {
         session.lastActivity = Date.now();
         if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(event));
       })
-      .on('end', () => closeSession(ws))
-      .on('close', () => closeSession(ws));
+      .on('end', () => closeSession(ws, 'stream end'))
+      .on('close', () => closeSession(ws, 'stream close'));
 
     sessions.set(ws, { client, stream, speaker, sessionId, lastActivity: Date.now(), totalBytesReceived: 0 });
     ws.send(JSON.stringify({ type: 'connected', sessionId, speaker }));
@@ -145,8 +145,8 @@ function handleSTTConnection(ws, req) {
     } catch (err) { /* ignore write errors */ }
   });
 
-  ws.on('close', () => closeSession(ws));
-  ws.on('error', () => closeSession(ws));
+  ws.on('close', () => closeSession(ws, 'client close'));
+  ws.on('error', () => closeSession(ws, 'client error'));
 }
 
 app.prepare().then(() => {

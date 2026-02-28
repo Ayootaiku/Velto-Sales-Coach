@@ -130,13 +130,10 @@ export function useSTTStream(
   const connectWebSocket = useCallback(async (speaker: 'salesperson' | 'prospect', sessionId: string, diarize = false): Promise<WebSocket> => {
     const params = `?session=${sessionId}&speaker=${speaker}${diarize ? '&diarize=true' : ''}`
 
-    // Extension: always use Railway (setter, then Vite define, then hardcoded fallback — never localhost)
-    const inExtension = typeof chrome !== 'undefined' && !!chrome.runtime?.id
+    // Use Railway WSS for both extension and website (aligned to Railway, not localhost)
     const railwayWss = (typeof import.meta !== 'undefined' && (import.meta as { env?: { VITE_RAILWAY_WSS?: string } }).env?.VITE_RAILWAY_WSS) || ''
     const railwayFallback = 'wss://velto-sales-coach-production.up.railway.app'
-    const cloudBase = inExtension
-      ? (_wssBaseUrl || railwayWss || railwayFallback)
-      : (_wssBaseUrl || railwayWss || '')
+    const cloudBase = _wssBaseUrl || railwayWss || railwayFallback
 
     if (cloudBase) {
       return new Promise((resolve, reject) => {
@@ -304,18 +301,20 @@ export function useSTTStream(
         console.log(`[TRACE-E] ${speaker} - WebSocket CLOSED (finals received: ${transcriptCountRef.current})`)
         setIsConnected(false)
 
-        // Auto-reconnect logic
+        // Auto-reconnect logic: use a fresh session ID so the server gets a clean session
         if (isStreaming && reconnectAttemptsRef.current < MAX_RECONNECT_ATTEMPTS) {
           reconnectAttemptsRef.current++
 
           setTimeout(async () => {
             try {
               if (!streamRef.current) return
-              const newWs = await connectWebSocket(speaker, newSessionId, isDiarizedRef.current)
+              const newSessionIdForReconnect = `${speaker}-${Date.now()}-${Math.random().toString(36).substring(2, 8)}`
+              sessionIdRef.current = newSessionIdForReconnect
+              const newWs = await connectWebSocket(speaker, newSessionIdForReconnect, isDiarizedRef.current)
               wsRef.current = newWs
               setIsConnected(true)
 
-              // Re-attach message handler
+              // Re-attach message handler so TRACE-B/C/D continue after reconnect
               newWs.onmessage = ws.onmessage
             } catch (err) {
               console.error(`[WS STT ${speaker}] ❌ Reconnect failed:`, err)
