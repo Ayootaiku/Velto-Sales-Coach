@@ -1,7 +1,19 @@
-chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
+chrome.sidePanel.setPanelBehavior({ openPanelOnActionClick: true }).catch(() => {});
+
+chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (message.type === 'OPEN_SIDE_PANEL') {
-    // Popup cannot be opened programmatically; FAB click is a no-op. Optional: content script shows toast.
-    sendResponse({ success: true });
+    const windowId = sender.tab?.windowId;
+    if (windowId != null) {
+      chrome.sidePanel.open({ windowId }).then(() => sendResponse({ success: true })).catch(() => sendResponse({ success: false }));
+    } else {
+      chrome.windows.getCurrent((win) => {
+        if (win?.id != null) {
+          chrome.sidePanel.open({ windowId: win.id }).then(() => sendResponse({ success: true })).catch(() => sendResponse({ success: false }));
+        } else {
+          sendResponse({ success: false });
+        }
+      });
+    }
     return true;
   }
   if (message.type === 'OPEN_FLOATING_ORB') {

@@ -107,6 +107,8 @@ function AsyncSummaryGenerator({ generator, onClose }: { generator: () => Promis
   return <CallSummary data={summaryData} onClose={onClose} />
 }
 
+const SHOW_MOVABLE_ORB_KEY = 'showMovableOrb'
+
 function SettingsPanel({
   settings,
   onSave,
@@ -117,6 +119,15 @@ function SettingsPanel({
   onClose: () => void
 }) {
   const [localSettings, setLocalSettings] = useState<CoachSettings>(settings)
+  const [showMovableOrb, setShowMovableOrb] = useState(true)
+  const inExtension = typeof chrome !== 'undefined' && !!chrome.runtime?.id
+
+  useEffect(() => {
+    if (!inExtension) return
+    chrome.storage.local.get([SHOW_MOVABLE_ORB_KEY], (result) => {
+      if (result[SHOW_MOVABLE_ORB_KEY] !== undefined) setShowMovableOrb(Boolean(result[SHOW_MOVABLE_ORB_KEY]))
+    })
+  }, [inExtension])
 
   const emotionMap: Record<string, number> = {
     'Empathetic': 0,
@@ -141,6 +152,24 @@ function SettingsPanel({
 
       <ScrollArea className="flex-1 p-5">
         <div className="space-y-6 pb-20">
+          {inExtension && (
+            <div className="space-y-2">
+              <Label className="text-[10px] uppercase font-bold text-zinc-500 tracking-widest">Show movable orb on pages</Label>
+              <label className="flex items-center gap-2 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={showMovableOrb}
+                  onChange={(e) => {
+                    const v = e.target.checked
+                    setShowMovableOrb(v)
+                    chrome.storage.local.set({ [SHOW_MOVABLE_ORB_KEY]: v })
+                  }}
+                  className="rounded border-[#3f3f46] bg-[#27272a] text-[#d4ff32] focus:ring-[#d4ff32]"
+                />
+                <span className="text-sm text-white">Show the orb on web pages</span>
+              </label>
+            </div>
+          )}
           {/* Emotion Style Slider */}
           <div className="space-y-4">
             <div className="flex justify-between items-center">
@@ -349,6 +378,7 @@ export function SalesCoachOverlay() {
   const coachingDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const isCoachingInProgressRef = useRef(false)
   const partialDraftShownRef = useRef(false)
+  const didAutoStartInRoomRef = useRef(false)
 
   // DEDUPLICATION: Track last processed transcript to prevent duplicate callbacks
   const lastProcessedTranscriptRef = useRef<string>('')
@@ -1010,15 +1040,7 @@ export function SalesCoachOverlay() {
           sampleRate: 16000
         }
       }
-      const requestMic = (): Promise<MediaStream> => {
-        const inExtension = typeof chrome !== 'undefined' && chrome.runtime?.id && chrome.permissions?.request
-        if (inExtension) {
-          return ((chrome as any).permissions.request({ permissions: ['audioCapture'] }) as Promise<boolean>)
-            .then(() => navigator.mediaDevices.getUserMedia(audioConstraints))
-            .catch(() => navigator.mediaDevices.getUserMedia(audioConstraints))
-        }
-        return navigator.mediaDevices.getUserMedia(audioConstraints)
-      }
+      const requestMic = (): Promise<MediaStream> => navigator.mediaDevices.getUserMedia(audioConstraints)
       requestMic()
         .then((micStreamForDiarized: MediaStream) => {
           addLog("🚀 INITIALIZING IN-ROOM CAPTURE (Diarization V1.2)...")
@@ -1064,6 +1086,18 @@ export function SalesCoachOverlay() {
       }])
     }
   }, [salespersonStream, addLog, resetTrace, updateTrace])
+
+  // When opened from extension via ?start=inroom, auto-start In-Room on the website (bypass extension mic limits)
+  useEffect(() => {
+    if (typeof window === 'undefined' || didAutoStartInRoomRef.current) return
+    const inExtension = typeof chrome !== 'undefined' && !!chrome.runtime?.id
+    if (inExtension) return
+    const params = new URLSearchParams(window.location.search)
+    if (params.get('start') !== 'inroom') return
+    didAutoStartInRoomRef.current = true
+    handleStartCoaching('diarized')
+    window.history.replaceState({}, '', window.location.pathname + (window.location.hash || ''))
+  }, [handleStartCoaching])
 
   const handleEndCall = useCallback(async () => {
     addLog("Ending call...")
@@ -1171,7 +1205,15 @@ export function SalesCoachOverlay() {
                 </button>
                 <button
                   type="button"
-                  onClick={() => handleStartCoaching('diarized')}
+                  onClick={() => {
+                    const inExtension = typeof chrome !== 'undefined' && !!chrome.runtime?.id
+                    if (inExtension) {
+                      const websiteUrl = 'https://velto-sales-coach-production.up.railway.app'
+                      window.open(`${websiteUrl}?start=inroom`, '_blank')
+                      return
+                    }
+                    handleStartCoaching('diarized')
+                  }}
                   className="w-full py-3.5 rounded-xl bg-transparent border border-[#3f3f46] hover:bg-[#2c2c2e] text-[#ffffff] text-[13px] font-bold tracking-wide transition-all"
                 >
                   In-Room Mode

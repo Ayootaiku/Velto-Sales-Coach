@@ -30,6 +30,7 @@ export default defineConfig({
     minify: 'esbuild',
     rollupOptions: {
       input: {
+        sidepanel: path.resolve(__dirname, 'sidepanel.html'),
         popup: path.resolve(__dirname, 'popup.html'),
         options: path.resolve(__dirname, 'options.html'),
         background: path.resolve(__dirname, 'src/background.ts'),
