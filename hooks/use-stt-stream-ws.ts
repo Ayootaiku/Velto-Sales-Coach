@@ -339,9 +339,12 @@ export function useSTTStream(
       const closeHandler = () => {
         // TRACE E: sttStreamEnded (WebSocket close)
         console.log(`[TRACE-E] ${speaker} - WebSocket CLOSED (finals received: ${transcriptCountRef.current})`)
+        if (transcriptCountRef.current === 0 && !hasReceivedPartialRef.current) {
+          console.log(`[TRACE-E] ${speaker} - Premature close (no C/D this session). Reconnecting...`)
+        }
         setIsConnected(false)
 
-        // Auto-reconnect logic: use a fresh session ID so the server gets a clean session
+        // Auto-reconnect logic: reconnect with same session ID
         if (isStreamingRef.current && reconnectAttemptsRef.current < MAX_RECONNECT_ATTEMPTS) {
           reconnectAttemptsRef.current++
           const delayMs = 1000 * reconnectAttemptsRef.current
@@ -393,11 +396,12 @@ export function useSTTStream(
 
       scriptProcessor.onaudioprocess = (audioEvent) => {
         const now = Date.now()
-        lastAudioProcessTimeRef.current = now // Mark that we're receiving callbacks (before any early return)
 
         // ALWAYS use the current WS reference (it might change during rollover)
         const currentWs = wsRef.current
         if (!currentWs || currentWs.readyState !== WebSocket.OPEN) return
+
+        lastAudioProcessTimeRef.current = now // Only when socket is open so no-audio watchdog can fire when closed
 
         const inputBuffer = audioEvent.inputBuffer
         const inputData = inputBuffer.getChannelData(0) // Mono
@@ -495,12 +499,8 @@ export function useSTTStream(
         const timeSinceLastAudio = now - lastAudioProcessTimeRef.current
 
         if (isStreamingRef.current && timeSinceLastAudio > 5000) {
-          if (hasReceivedPartialRef.current) {
-            console.warn(`[WATCHDOG] ${speaker} - 🔥 NO AUDIO CAPTURE FOR ${timeSinceLastAudio}ms. FORCE RESTARTING...`)
-            startAutomaticRef.current?.()
-          } else {
-            console.warn(`[WATCHDOG] ${speaker} - C not reached yet, skipping force restart`)
-          }
+          console.warn(`[WATCHDOG] ${speaker} - 🔥 NO AUDIO CAPTURE FOR ${timeSinceLastAudio}ms. FORCE RESTARTING...`)
+          startAutomaticRef.current?.()
         }
       }, 2000)
 

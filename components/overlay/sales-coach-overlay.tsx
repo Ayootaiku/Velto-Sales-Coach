@@ -698,6 +698,7 @@ export function SalesCoachOverlay() {
       updateTrace({ E: true, cardId: streamingCardId })
 
       // AUTO-START NEW STREAM: Now that AI has responded, start a fresh prospect stream
+      console.log(`[Prospect AI Response] Turn complete. Starting NEW prospect stream...`)
       console.log(`[POST-TURN] Restarting prospect stream (startAutomatic)...`)
       if (isDiarized) {
         addLog("⚡ SYSTEM: HARDWARE RESET (Immediate Post-Response)...")
@@ -744,6 +745,7 @@ export function SalesCoachOverlay() {
       updateTrace({ E: true, cardId })
 
       // AUTO-START NEW STREAM even on error to keep the loop going
+      console.log(`[Prospect AI Error] Error turn complete. Starting NEW prospect stream...`)
       console.log(`[POST-TURN] Restarting prospect stream (startAutomatic)...`)
       prospectStartAutomaticRef.current?.()
     }
