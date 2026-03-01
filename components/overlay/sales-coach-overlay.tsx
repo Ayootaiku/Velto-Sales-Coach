@@ -688,8 +688,17 @@ export function SalesCoachOverlay() {
       addLog(`[Trace] Step E: Card Rendered (Turn: ${trace.turnId}, ID: ${streamingCardId})`)
       updateTrace({ E: true, cardId: streamingCardId })
 
-      // Keep same stream alive; watchdogs (no-audio 5s, silent buffer 4s) will restart only when needed
-      console.log(`[Prospect AI Response] Turn complete. Keeping stream alive (no post-turn restart).`)
+      // AUTO-START NEW STREAM: Now that AI has responded, start a fresh prospect stream
+      console.log(`[Prospect AI Response] 🔄 Turn complete. Starting NEW prospect stream...`)
+      if (isDiarized) {
+        addLog("⚡ SYSTEM: HARDWARE RESET (Immediate Post-Response)...")
+        setTimeout(() => {
+          console.warn("[IN-ROOM WATCHDOG] 🔄 Refreshing audio pulse to prevent timeout...")
+          salespersonStream.startAutomatic()
+        }, 100)
+      } else {
+        prospectStream.startAutomatic()
+      }
 
     } catch (e) {
       addLog(`❌ AI Error: ${e}`)
@@ -725,8 +734,9 @@ export function SalesCoachOverlay() {
       addLog(`[Trace] Step E: Card Rendered (Turn: ${trace.turnId}, ID: ${cardId})`)
       updateTrace({ E: true, cardId })
 
-      // Keep same stream; watchdogs will restart if needed
-      console.log(`[Prospect AI Error] Error turn complete. Keeping stream (no restart).`)
+      // AUTO-START NEW STREAM even on error to keep the loop going
+      console.log(`[Prospect AI Error] 🔄 Error turn complete. Starting NEW prospect stream...`)
+      prospectStream.startAutomatic()
     }
   }, [addLog, prospectStream.isConnected, prospectStream.isStreaming, updateTrace, salespersonStream, trace.turnId, prospectStream.sessionId, isDiarized])
 

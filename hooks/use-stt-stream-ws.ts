@@ -82,6 +82,7 @@ export function useSTTStream(
   const wsMessageHandlerRef = useRef<((event: MessageEvent) => void) | null>(null)
   const wsCloseHandlerRef = useRef<(() => void) | null>(null)
   const reconnectWebSocketOnlyRef = useRef<(() => void) | null>(null)
+  const startAutomaticRef = useRef<(() => Promise<void>) | null>(null)
 
   // DEDUPLICATION: Track server-finalized text to prevent double finalization
   const serverFinalizedTextRef = useRef<string>('')
@@ -170,14 +171,13 @@ export function useSTTStream(
     throw lastError || new Error('WebSocket connection failed - server may not be running')
   }, [])
 
-  // Shared reconnect logic: new session, new WS, re-attach handlers (used by onclose and by reconnectWebSocketOnly)
+  // Shared reconnect logic: same session ID, new WS, re-attach handlers (original behavior for Railway)
   const runReconnect = useCallback(async () => {
     const speaker = speakerRef.current
     if (!speaker || !streamRef.current) return
     try {
-      const newSessionIdForReconnect = `${speaker}-${Date.now()}-${Math.random().toString(36).substring(2, 8)}`
-      sessionIdRef.current = newSessionIdForReconnect
-      const newWs = await connectWebSocket(speaker, newSessionIdForReconnect, isDiarizedRef.current)
+      const sessionIdToUse = sessionIdRef.current
+      const newWs = await connectWebSocket(speaker, sessionIdToUse, isDiarizedRef.current)
       wsRef.current = newWs
       setIsConnected(true)
       if (wsMessageHandlerRef.current) newWs.onmessage = wsMessageHandlerRef.current
@@ -412,9 +412,9 @@ export function useSTTStream(
 
         // Detect silent buffer bug: If RMS is exactly 0 for 4 seconds, the browser audio stack is stuck
         if (now - lastActiveTimeRef.current > 4000 && isStreamingRef.current) {
-          console.warn(`[SILENT BUFFER BUG] ${speaker} - Buffer is 0.0000. Reconnecting WebSocket only...`)
+          console.warn(`[SILENT BUFFER BUG] ${speaker} - Buffer is 0.0000. FORCING HARDWARE RESET...`)
           lastActiveTimeRef.current = now // Prevent loop
-          reconnectWebSocketOnlyRef.current?.()
+          startAutomaticRef.current?.()
           return
         }
 
@@ -486,8 +486,8 @@ export function useSTTStream(
         const timeSinceLastAudio = now - lastAudioProcessTimeRef.current
 
         if (isStreamingRef.current && timeSinceLastAudio > 5000) {
-          console.warn(`[WATCHDOG] ${speaker} - 🔥 NO AUDIO CAPTURE FOR ${timeSinceLastAudio}ms. Reconnecting WebSocket only...`)
-          reconnectWebSocketOnlyRef.current?.()
+          console.warn(`[WATCHDOG] ${speaker} - 🔥 NO AUDIO CAPTURE FOR ${timeSinceLastAudio}ms. FORCE RESTARTING...`)
+          startAutomaticRef.current?.()
         }
       }, 2000)
 
@@ -628,6 +628,10 @@ export function useSTTStream(
   useEffect(() => {
     reconnectWebSocketOnlyRef.current = reconnectWebSocketOnly
   }, [reconnectWebSocketOnly])
+
+  useEffect(() => {
+    startAutomaticRef.current = startAutomatic
+  }, [startAutomatic])
 
   return {
     isConnected,
