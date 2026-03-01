@@ -339,7 +339,9 @@ export function useSTTStream(
         // Auto-reconnect logic: use a fresh session ID so the server gets a clean session
         if (isStreamingRef.current && reconnectAttemptsRef.current < MAX_RECONNECT_ATTEMPTS) {
           reconnectAttemptsRef.current++
-          setTimeout(() => { void runReconnect() }, 1000 * reconnectAttemptsRef.current) // Exponential backoff
+          const delayMs = 1000 * reconnectAttemptsRef.current
+          console.log(`[WS STT ${speaker}] Reconnecting in ${delayMs}ms (attempt ${reconnectAttemptsRef.current}, stream still intended live)`)
+          setTimeout(() => { void runReconnect() }, delayMs) // Exponential backoff
         }
       }
       wsCloseHandlerRef.current = closeHandler

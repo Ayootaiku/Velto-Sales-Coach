@@ -42,11 +42,12 @@ function getSpeechClient() {
 
 function closeSession(ws, reason) {
   const session = sessions.get(ws);
+  const sessionId = session ? session.sessionId : 'no-session';
   if (session) {
     try { session.stream?.end(); } catch (e) { /* ignore */ }
-    console.log(`[STT] Session closed: ${session.sessionId} (reason: ${reason || 'unknown'})`);
     sessions.delete(ws);
   }
+  console.log(`[STT] Session closed: ${sessionId} (reason: ${reason || 'unknown'})`);
   if (ws.readyState === WebSocket.OPEN) ws.close();
 }
 
