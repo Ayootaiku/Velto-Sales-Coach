@@ -380,10 +380,6 @@ export function SalesCoachOverlay() {
   const partialDraftShownRef = useRef(false)
   const didAutoStartInRoomRef = useRef(false)
 
-  // Stable refs for post-turn restart (avoids stale closure in runCoaching)
-  const prospectStartAutomaticRef = useRef<(() => Promise<void>) | null>(null)
-  const salespersonStartAutomaticRef = useRef<(() => Promise<void>) | null>(null)
-
   // DEDUPLICATION: Track last processed transcript to prevent duplicate callbacks
   const lastProcessedTranscriptRef = useRef<string>('')
   const lastProcessedTimeRef = useRef<number>(0)
@@ -506,11 +502,6 @@ export function SalesCoachOverlay() {
     }
   })
 
-  useEffect(() => {
-    prospectStartAutomaticRef.current = prospectStream.startAutomatic
-    salespersonStartAutomaticRef.current = salespersonStream.startAutomatic
-  }, [prospectStream.startAutomatic, salespersonStream.startAutomatic])
-
   const addLog = useCallback((msg: string) => {
     setDebugLogs(prev => [...prev.slice(-19), `${new Date().toLocaleTimeString()}: ${msg}`])
   }, [])
@@ -618,6 +609,9 @@ export function SalesCoachOverlay() {
     addLog(`[Trace] Step C: Coach Request Started (Turn: ${nextTurnId}, Session: ${prospectStream.sessionId})`)
     updateTrace({ C: true, turnId: nextTurnId })
 
+    // Keep AudioContext running during API call so TRACE-C partials don't drop
+    prospectStream.ensureContextResumed()
+    salespersonStream.ensureContextResumed()
 
     // Track timeout to clear it if API responds successfully
     let timeoutId: ReturnType<typeof setTimeout> | null = null
@@ -698,16 +692,16 @@ export function SalesCoachOverlay() {
       updateTrace({ E: true, cardId: streamingCardId })
 
       // AUTO-START NEW STREAM: Now that AI has responded, start a fresh prospect stream
-      console.log(`[Prospect AI Response] Turn complete. Starting NEW prospect stream...`)
-      console.log(`[POST-TURN] Restarting prospect stream (startAutomatic)...`)
+      console.log(`[Prospect AI Response] 🔄 Turn complete. Starting NEW prospect stream...`)
       if (isDiarized) {
+        // Force Hardware Reset after AI card to ensure clean state
         addLog("⚡ SYSTEM: HARDWARE RESET (Immediate Post-Response)...")
         setTimeout(() => {
           console.warn("[IN-ROOM WATCHDOG] 🔄 Refreshing audio pulse to prevent timeout...")
-          salespersonStartAutomaticRef.current?.()
+          salespersonStream.startAutomatic()
         }, 100)
       } else {
-        prospectStartAutomaticRef.current?.()
+        prospectStream.startAutomatic()
       }
 
     } catch (e) {
@@ -745,9 +739,8 @@ export function SalesCoachOverlay() {
       updateTrace({ E: true, cardId })
 
       // AUTO-START NEW STREAM even on error to keep the loop going
-      console.log(`[Prospect AI Error] Error turn complete. Starting NEW prospect stream...`)
-      console.log(`[POST-TURN] Restarting prospect stream (startAutomatic)...`)
-      prospectStartAutomaticRef.current?.()
+      console.log(`[Prospect AI Error] 🔄 Error turn complete. Starting NEW prospect stream...`)
+      prospectStream.startAutomatic()
     }
   }, [addLog, prospectStream.isConnected, prospectStream.isStreaming, updateTrace, salespersonStream, trace.turnId, prospectStream.sessionId, isDiarized])
 

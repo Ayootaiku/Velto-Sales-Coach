@@ -27,6 +27,7 @@ export interface UseSTTStreamReturn {
   startStream: (speaker: 'salesperson' | 'prospect', stream?: MediaStream, diarize?: boolean) => Promise<void>
   stopStream: () => void
   startAutomatic: () => Promise<void>
+  ensureContextResumed: () => void
   error: string | null
   onSpeechEnd?: (transcript: TranscriptResult) => void
 }
@@ -79,13 +80,6 @@ export function useSTTStream(
   const onSpeechEndRef = useRef(onSpeechEnd)
   const onSpeakerTurnRef = useRef(onSpeakerTurn)
   const isDiarizedRef = useRef(false)
-  const wsMessageHandlerRef = useRef<((event: MessageEvent) => void) | null>(null)
-  const wsCloseHandlerRef = useRef<(() => void) | null>(null)
-  const reconnectWebSocketOnlyRef = useRef<(() => void) | null>(null)
-  const startAutomaticRef = useRef<(() => Promise<void>) | null>(null)
-
-  // C-gate: only run watchdogs' startAutomatic after at least one partial (TRACE-C) this session
-  const hasReceivedPartialRef = useRef(false)
 
   // DEDUPLICATION: Track server-finalized text to prevent double finalization
   const serverFinalizedTextRef = useRef<string>('')
@@ -137,10 +131,13 @@ export function useSTTStream(
   const connectWebSocket = useCallback(async (speaker: 'salesperson' | 'prospect', sessionId: string, diarize = false): Promise<WebSocket> => {
     const params = `?session=${sessionId}&speaker=${speaker}${diarize ? '&diarize=true' : ''}`
 
-    // Use Railway WSS for both extension and website (aligned to Railway, not localhost)
+    // Extension: always use Railway (setter, then Vite define, then hardcoded fallback — never localhost)
+    const inExtension = typeof chrome !== 'undefined' && !!chrome.runtime?.id
     const railwayWss = (typeof import.meta !== 'undefined' && (import.meta as { env?: { VITE_RAILWAY_WSS?: string } }).env?.VITE_RAILWAY_WSS) || ''
     const railwayFallback = 'wss://velto-sales-coach-production.up.railway.app'
-    const cloudBase = _wssBaseUrl || railwayWss || railwayFallback
+    const cloudBase = inExtension
+      ? (_wssBaseUrl || railwayWss || railwayFallback)
+      : (_wssBaseUrl || railwayWss || '')
 
     if (cloudBase) {
       return new Promise((resolve, reject) => {
@@ -174,35 +171,6 @@ export function useSTTStream(
     throw lastError || new Error('WebSocket connection failed - server may not be running')
   }, [])
 
-  // Shared reconnect logic: same session ID, new WS, re-attach handlers (original behavior for Railway)
-  const runReconnect = useCallback(async () => {
-    const speaker = speakerRef.current
-    if (!speaker || !streamRef.current) return
-    try {
-      const sessionIdToUse = sessionIdRef.current
-      const newWs = await connectWebSocket(speaker, sessionIdToUse, isDiarizedRef.current)
-      wsRef.current = newWs
-      setIsConnected(true)
-      if (wsMessageHandlerRef.current) newWs.onmessage = wsMessageHandlerRef.current
-      if (wsCloseHandlerRef.current) newWs.onclose = wsCloseHandlerRef.current
-    } catch (err) {
-      console.error(`[WS STT ${speaker}] ❌ Reconnect failed:`, err)
-      if (reconnectAttemptsRef.current >= MAX_RECONNECT_ATTEMPTS) {
-        setIsStreaming(false)
-        setError('WebSocket connection lost. Please restart session.')
-      }
-    }
-  }, [connectWebSocket])
-
-  // WebSocket-only reconnect: keep audio pipeline and intervals, only replace the socket (used by silent buffer and no-audio watchdogs)
-  const reconnectWebSocketOnly = useCallback(() => {
-    if (!wsRef.current || !streamRef.current || !speakerRef.current) return
-    wsRef.current.onclose = null
-    wsRef.current.close()
-    wsRef.current = null
-    reconnectAttemptsRef.current = 0
-    void runReconnect()
-  }, [runReconnect])
 
   const startStream = useCallback(async (speaker: 'salesperson' | 'prospect', audioStream?: MediaStream, diarize = false) => {
     try {
@@ -212,7 +180,6 @@ export function useSTTStream(
       // Generate session ID
       const newSessionId = `${speaker}-${Date.now()}-${Math.random().toString(36).substring(2, 8)}`
       sessionIdRef.current = newSessionId
-      hasReceivedPartialRef.current = false
       transcriptCountRef.current = 0
       bytesSentRef.current = 0
 
@@ -253,7 +220,7 @@ export function useSTTStream(
       setIsConnected(true)
       setError(null)
 
-      const messageHandler = (event: MessageEvent) => {
+      ws.onmessage = (event) => {
         try {
           const data = JSON.parse(event.data)
 
@@ -318,7 +285,6 @@ export function useSTTStream(
           } else if (data.type === 'partial') {
             // TRACE C: gotPartial
             console.log(`[TRACE-C] ${speaker} - Got partial:`, data.text.substring(0, 30))
-            hasReceivedPartialRef.current = true
             const result: TranscriptResult = {
               text: data.text,
               isFinal: false,
@@ -333,27 +299,35 @@ export function useSTTStream(
           console.error('[WS STT] Error parsing message:', e)
         }
       }
-      wsMessageHandlerRef.current = messageHandler
-      ws.onmessage = messageHandler
 
-      const closeHandler = () => {
+      ws.onclose = () => {
         // TRACE E: sttStreamEnded (WebSocket close)
         console.log(`[TRACE-E] ${speaker} - WebSocket CLOSED (finals received: ${transcriptCountRef.current})`)
-        if (transcriptCountRef.current === 0 && !hasReceivedPartialRef.current) {
-          console.log(`[TRACE-E] ${speaker} - Premature close (no C/D this session). Reconnecting...`)
-        }
         setIsConnected(false)
 
-        // Auto-reconnect logic: reconnect with same session ID
-        if (isStreamingRef.current && reconnectAttemptsRef.current < MAX_RECONNECT_ATTEMPTS) {
+        // Auto-reconnect logic
+        if (isStreaming && reconnectAttemptsRef.current < MAX_RECONNECT_ATTEMPTS) {
           reconnectAttemptsRef.current++
-          const delayMs = 1000 * reconnectAttemptsRef.current
-          console.log(`[WS STT ${speaker}] Reconnecting in ${delayMs}ms (attempt ${reconnectAttemptsRef.current}, stream still intended live)`)
-          setTimeout(() => { void runReconnect() }, delayMs) // Exponential backoff
+
+          setTimeout(async () => {
+            try {
+              if (!streamRef.current) return
+              const newWs = await connectWebSocket(speaker, newSessionId, isDiarizedRef.current)
+              wsRef.current = newWs
+              setIsConnected(true)
+
+              // Re-attach message handler
+              newWs.onmessage = ws.onmessage
+            } catch (err) {
+              console.error(`[WS STT ${speaker}] ❌ Reconnect failed:`, err)
+              if (reconnectAttemptsRef.current >= MAX_RECONNECT_ATTEMPTS) {
+                setIsStreaming(false)
+                setError('WebSocket connection lost. Please restart session.')
+              }
+            }
+          }, 1000 * reconnectAttemptsRef.current) // Exponential backoff: 1s, 2s, 3s
         }
       }
-      wsCloseHandlerRef.current = closeHandler
-      ws.onclose = closeHandler
 
       // Set up Web Audio API for PCM capture
       // 1. Recycle existing AudioContext if possible (must be NOT closed)
@@ -396,12 +370,11 @@ export function useSTTStream(
 
       scriptProcessor.onaudioprocess = (audioEvent) => {
         const now = Date.now()
+        lastAudioProcessTimeRef.current = now // Mark that we're receiving callbacks (before any early return)
 
         // ALWAYS use the current WS reference (it might change during rollover)
         const currentWs = wsRef.current
         if (!currentWs || currentWs.readyState !== WebSocket.OPEN) return
-
-        lastAudioProcessTimeRef.current = now // Only when socket is open so no-audio watchdog can fire when closed
 
         const inputBuffer = audioEvent.inputBuffer
         const inputData = inputBuffer.getChannelData(0) // Mono
@@ -421,13 +394,9 @@ export function useSTTStream(
 
         // Detect silent buffer bug: If RMS is exactly 0 for 4 seconds, the browser audio stack is stuck
         if (now - lastActiveTimeRef.current > 4000 && isStreamingRef.current) {
+          console.warn(`[SILENT BUFFER BUG] ${speaker} - Buffer is 0.0000. FORCING HARDWARE RESET...`)
           lastActiveTimeRef.current = now // Prevent loop
-          if (hasReceivedPartialRef.current) {
-            console.warn(`[SILENT BUFFER BUG] ${speaker} - Buffer is 0.0000. FORCING HARDWARE RESET...`)
-            startAutomaticRef.current?.()
-          } else {
-            console.warn(`[SILENT BUFFER] ${speaker} - C not reached yet, skipping hardware reset`)
-          }
+          startAutomatic()
           return
         }
 
@@ -492,15 +461,15 @@ export function useSTTStream(
       isStreamingRef.current = true
       lastAudioProcessTimeRef.current = Date.now()
 
-      // Start Watchdog: Use ref to avoid stale state in interval
-      if (watchdogIntervalRef.current) clearInterval(watchdogIntervalRef.current)
+      // No-audio watchdog: restart if browser stops delivering onaudioprocess (e.g. suspended AudioContext).
+      // Use 2.5s (not 5s) so TRACE-C recovers sooner and is not dependent on overlay's post-API restart.
       watchdogIntervalRef.current = setInterval(() => {
         const now = Date.now()
         const timeSinceLastAudio = now - lastAudioProcessTimeRef.current
 
-        if (isStreamingRef.current && timeSinceLastAudio > 5000) {
+        if (isStreamingRef.current && timeSinceLastAudio > 2500) {
           console.warn(`[WATCHDOG] ${speaker} - 🔥 NO AUDIO CAPTURE FOR ${timeSinceLastAudio}ms. FORCE RESTARTING...`)
-          startAutomaticRef.current?.()
+          startAutomatic()
         }
       }, 2000)
 
@@ -520,7 +489,7 @@ export function useSTTStream(
       console.error(`[WS STT ${speaker}] ❌ Error starting stream:`, err)
       setError(err instanceof Error ? err.message : 'Failed to start stream')
     }
-  }, [connectWebSocket, resampleAudio, calculateRMS, runReconnect])
+  }, [connectWebSocket, resampleAudio, calculateRMS]) // Removed isStreaming dependency
 
   const stopStream = useCallback(async (keepTracks = false) => {
     if (isStoppingRef.current) return
@@ -599,7 +568,7 @@ export function useSTTStream(
     stopStream(true)
       ; (window as any).forceKillContext = false
 
-    // 2. Larger delay to ensure hardware/stack is fully released
+    // 2. Delay so hardware/stack is released before new stream (reduces TRACE-C gap on restart)
     await new Promise(resolve => setTimeout(resolve, 800))
 
     // 3. Start from fresh with internal nodes
@@ -618,6 +587,16 @@ export function useSTTStream(
       setError(`Auto-start failed: ${err instanceof Error ? err.message : String(err)}`)
     }
   }, [stopStream, startStream])
+
+  // Call before API/coaching so AudioContext stays running and TRACE-C doesn't drop during request
+  const ensureContextResumed = useCallback(() => {
+    const ctx = audioContextRef.current
+    if (ctx && ctx.state === 'suspended' && isStreamingRef.current) {
+      ctx.resume().then(() => {
+        console.log('[WS STT] AudioContext resumed before API (was suspended)')
+      }).catch(() => {})
+    }
+  }, [])
 
   useEffect(() => {
     return () => { void stopStream() }
@@ -638,14 +617,6 @@ export function useSTTStream(
     return () => document.removeEventListener('visibilitychange', onVisibilityChange)
   }, [])
 
-  useEffect(() => {
-    reconnectWebSocketOnlyRef.current = reconnectWebSocketOnly
-  }, [reconnectWebSocketOnly])
-
-  useEffect(() => {
-    startAutomaticRef.current = startAutomatic
-  }, [startAutomatic])
-
   return {
     isConnected,
     isStreaming,
@@ -660,6 +631,7 @@ export function useSTTStream(
     stopStream,
     error,
     onSpeechEnd,
-    startAutomatic
+    startAutomatic,
+    ensureContextResumed
   }
 }
