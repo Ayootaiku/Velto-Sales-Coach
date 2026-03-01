@@ -380,6 +380,10 @@ export function SalesCoachOverlay() {
   const partialDraftShownRef = useRef(false)
   const didAutoStartInRoomRef = useRef(false)
 
+  // Stable refs for post-turn restart (avoids stale closure in runCoaching)
+  const prospectStartAutomaticRef = useRef<(() => Promise<void>) | null>(null)
+  const salespersonStartAutomaticRef = useRef<(() => Promise<void>) | null>(null)
+
   // DEDUPLICATION: Track last processed transcript to prevent duplicate callbacks
   const lastProcessedTranscriptRef = useRef<string>('')
   const lastProcessedTimeRef = useRef<number>(0)
@@ -501,6 +505,11 @@ export function SalesCoachOverlay() {
       addLog(`❌ ERROR: handleTranscriptRef is missing`)
     }
   })
+
+  useEffect(() => {
+    prospectStartAutomaticRef.current = prospectStream.startAutomatic
+    salespersonStartAutomaticRef.current = salespersonStream.startAutomatic
+  }, [prospectStream.startAutomatic, salespersonStream.startAutomatic])
 
   const addLog = useCallback((msg: string) => {
     setDebugLogs(prev => [...prev.slice(-19), `${new Date().toLocaleTimeString()}: ${msg}`])
@@ -689,15 +698,15 @@ export function SalesCoachOverlay() {
       updateTrace({ E: true, cardId: streamingCardId })
 
       // AUTO-START NEW STREAM: Now that AI has responded, start a fresh prospect stream
-      console.log(`[Prospect AI Response] 🔄 Turn complete. Starting NEW prospect stream...`)
+      console.log(`[POST-TURN] Restarting prospect stream (startAutomatic)...`)
       if (isDiarized) {
         addLog("⚡ SYSTEM: HARDWARE RESET (Immediate Post-Response)...")
         setTimeout(() => {
           console.warn("[IN-ROOM WATCHDOG] 🔄 Refreshing audio pulse to prevent timeout...")
-          salespersonStream.startAutomatic()
+          salespersonStartAutomaticRef.current?.()
         }, 100)
       } else {
-        prospectStream.startAutomatic()
+        prospectStartAutomaticRef.current?.()
       }
 
     } catch (e) {
@@ -735,8 +744,8 @@ export function SalesCoachOverlay() {
       updateTrace({ E: true, cardId })
 
       // AUTO-START NEW STREAM even on error to keep the loop going
-      console.log(`[Prospect AI Error] 🔄 Error turn complete. Starting NEW prospect stream...`)
-      prospectStream.startAutomatic()
+      console.log(`[POST-TURN] Restarting prospect stream (startAutomatic)...`)
+      prospectStartAutomaticRef.current?.()
     }
   }, [addLog, prospectStream.isConnected, prospectStream.isStreaming, updateTrace, salespersonStream, trace.turnId, prospectStream.sessionId, isDiarized])
 

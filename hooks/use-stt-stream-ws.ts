@@ -84,6 +84,9 @@ export function useSTTStream(
   const reconnectWebSocketOnlyRef = useRef<(() => void) | null>(null)
   const startAutomaticRef = useRef<(() => Promise<void>) | null>(null)
 
+  // C-gate: only run watchdogs' startAutomatic after at least one partial (TRACE-C) this session
+  const hasReceivedPartialRef = useRef(false)
+
   // DEDUPLICATION: Track server-finalized text to prevent double finalization
   const serverFinalizedTextRef = useRef<string>('')
   const serverFinalizedTimeRef = useRef<number>(0)
@@ -209,6 +212,7 @@ export function useSTTStream(
       // Generate session ID
       const newSessionId = `${speaker}-${Date.now()}-${Math.random().toString(36).substring(2, 8)}`
       sessionIdRef.current = newSessionId
+      hasReceivedPartialRef.current = false
       transcriptCountRef.current = 0
       bytesSentRef.current = 0
 
@@ -314,6 +318,7 @@ export function useSTTStream(
           } else if (data.type === 'partial') {
             // TRACE C: gotPartial
             console.log(`[TRACE-C] ${speaker} - Got partial:`, data.text.substring(0, 30))
+            hasReceivedPartialRef.current = true
             const result: TranscriptResult = {
               text: data.text,
               isFinal: false,
@@ -412,9 +417,13 @@ export function useSTTStream(
 
         // Detect silent buffer bug: If RMS is exactly 0 for 4 seconds, the browser audio stack is stuck
         if (now - lastActiveTimeRef.current > 4000 && isStreamingRef.current) {
-          console.warn(`[SILENT BUFFER BUG] ${speaker} - Buffer is 0.0000. FORCING HARDWARE RESET...`)
           lastActiveTimeRef.current = now // Prevent loop
-          startAutomaticRef.current?.()
+          if (hasReceivedPartialRef.current) {
+            console.warn(`[SILENT BUFFER BUG] ${speaker} - Buffer is 0.0000. FORCING HARDWARE RESET...`)
+            startAutomaticRef.current?.()
+          } else {
+            console.warn(`[SILENT BUFFER] ${speaker} - C not reached yet, skipping hardware reset`)
+          }
           return
         }
 
@@ -486,8 +495,12 @@ export function useSTTStream(
         const timeSinceLastAudio = now - lastAudioProcessTimeRef.current
 
         if (isStreamingRef.current && timeSinceLastAudio > 5000) {
-          console.warn(`[WATCHDOG] ${speaker} - 🔥 NO AUDIO CAPTURE FOR ${timeSinceLastAudio}ms. FORCE RESTARTING...`)
-          startAutomaticRef.current?.()
+          if (hasReceivedPartialRef.current) {
+            console.warn(`[WATCHDOG] ${speaker} - 🔥 NO AUDIO CAPTURE FOR ${timeSinceLastAudio}ms. FORCE RESTARTING...`)
+            startAutomaticRef.current?.()
+          } else {
+            console.warn(`[WATCHDOG] ${speaker} - C not reached yet, skipping force restart`)
+          }
         }
       }, 2000)
 
