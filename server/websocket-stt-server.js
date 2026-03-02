@@ -130,21 +130,7 @@ async function startServer() {
   // Create WebSocket server
   const wss = new WebSocket.Server({ port: PORT });
 
-  // Set up ping interval to keep connections alive (every 10 seconds for more aggressive keep-alive)
-  // We send both a Ping frame AND a JSON message to ensure load balancers see activity
-  setInterval(() => {
-    wss.clients.forEach((ws) => {
-      if (ws.readyState === WebSocket.OPEN) {
-        ws.ping();
-        try {
-          ws.send(JSON.stringify({ type: 'heartbeat', timestamp: Date.now() }));
-        } catch (e) {
-          // Ignore send errors during heartbeat
-        }
-      }
-    });
-  }, 10000);
-
+  // We don't use server-side pings since the client handles all audio-flow check watchdog logic
   console.log(`[WS Server] WebSocket server started on port ${PORT}`);
 
   wss.on('connection', (ws, req) => {

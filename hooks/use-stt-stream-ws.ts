@@ -75,8 +75,6 @@ export function useSTTStream(
   const lastAudioProcessTimeRef = useRef<number>(Date.now())
   const isStreamingRef = useRef(false) // Use ref for stable closure access
   const watchdogIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null)
-  const streamRefreshIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null)
-  const lastPartialTimeRef = useRef<number>(Date.now())
   const onSpeechEndRef = useRef(onSpeechEnd)
   const onSpeakerTurnRef = useRef(onSpeakerTurn)
   const isDiarizedRef = useRef(false)
@@ -281,7 +279,6 @@ export function useSTTStream(
             }
           } else if (data.type === 'partial') {
             // TRACE C: gotPartial
-            lastPartialTimeRef.current = Date.now()
             console.log(`[TRACE-C] ${speaker} - Got partial:`, data.text.substring(0, 30))
             const result: TranscriptResult = {
               text: data.text,
@@ -462,30 +459,17 @@ export function useSTTStream(
       setIsStreaming(true)
       isStreamingRef.current = true
       lastAudioProcessTimeRef.current = Date.now()
-      lastPartialTimeRef.current = Date.now()
 
-      // Periodic stream refresh: if no partial (TRACE-C) in 3s while streaming, restart so stream stays ready after prospect responds.
-      if (streamRefreshIntervalRef.current) clearInterval(streamRefreshIntervalRef.current)
-      streamRefreshIntervalRef.current = setInterval(() => {
-        if (!isStreamingRef.current) return
-        const now = Date.now()
-        const idleMs = now - lastPartialTimeRef.current
-        if (idleMs > 3000) {
-          console.warn(`[STREAM REFRESH] ${speaker} - No partial in ${Math.round(idleMs / 1000)}s. Restarting stream for next prospect speech...`)
-          lastPartialTimeRef.current = now
-          startAutomatic()
-        }
-      }, 1500)
-
-      // No-audio watchdog (hard reset): if no onaudioprocess for 5000ms, force full hardware reset. No soft resume.
+      // Start Watchdog: Use ref to avoid stale state in interval
+      if (watchdogIntervalRef.current) clearInterval(watchdogIntervalRef.current)
       watchdogIntervalRef.current = setInterval(() => {
         const now = Date.now()
         const timeSinceLastAudio = now - lastAudioProcessTimeRef.current
 
-        if (!isStreamingRef.current || timeSinceLastAudio <= 5000) return
-
-        console.warn(`[WATCHDOG] ${speaker} - 🔥 NO AUDIO CAPTURE FOR ${timeSinceLastAudio}ms. FORCE RESTARTING...`)
-        startAutomatic()
+        if (isStreamingRef.current && timeSinceLastAudio > 5000) {
+          console.warn(`[WATCHDOG] ${speaker} - 🔥 NO AUDIO CAPTURE FOR ${timeSinceLastAudio}ms. FORCE RESTARTING...`)
+          startAutomatic()
+        }
       }, 2000)
 
       console.log(`[WS STT ${speaker}] ✅ Audio processing started (stream active: ${audioStreamToUse.active})`)
@@ -543,10 +527,6 @@ export function useSTTStream(
     if (watchdogIntervalRef.current) {
       clearInterval(watchdogIntervalRef.current)
       watchdogIntervalRef.current = null
-    }
-    if (streamRefreshIntervalRef.current) {
-      clearInterval(streamRefreshIntervalRef.current)
-      streamRefreshIntervalRef.current = null
     }
 
     if (streamRef.current && !keepTracks) {
