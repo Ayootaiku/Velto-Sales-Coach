@@ -1,0 +1,13 @@
+﻿1e129af | Current system: In-Room flow, STT hook, websocket server, extension manifest
+e3b3b3c | fix(in-room): request microphone first on click so extension shows permission prompt
+0417a2c | fix(in-room): request microphone at click so browser shows permission prompt
+5437a27 | fix(stt): resume AudioContext on visibility + periodic check so TRACE-C/TRACE-D receive partials
+98a5d9f | fix(extension): always use Railway WSS in extension, never localhost fallback
+70e6674 | Fix Trace A: extension uses Railway WSS via build-time VITE_RAILWAY_WSS
+648e074 | Extension: fallback to Railway WSS when in extension context
+7f3e779 | Combined server: Next.js + WebSocket STT on single Railway port
+cedd78d | Add Chrome extension: Manifest V3 side panel + floating FAB content script
+13c4071 | Fix Railway build: safe Supabase init, CORS headers, env var credentials for STT server
+267f481 | Checkpoint: working sales coach before extension conversion
+183e5c1 | Fix: Align package.json and pnpm-lock.yaml, pin pnpm version
+786aa55 | Fresh clean commit
