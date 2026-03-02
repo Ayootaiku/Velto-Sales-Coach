@@ -50,6 +50,87 @@ function closeSession(ws, reason) {
   if (ws.readyState === WebSocket.OPEN) ws.close();
 }
 
+/** Create a new Google STT stream for an existing session; keeps WebSocket open for whole call. */
+function createNewStreamForSession(session, ws) {
+  const client = session.client;
+  const config = session.config;
+  const sessionId = session.sessionId;
+  const oldStream = session.stream;
+  if (oldStream) {
+    try { oldStream.removeAllListeners(); oldStream.end(); } catch (e) { /* ignore */ }
+  }
+  const newStream = client
+    .streamingRecognize({ config, interimResults: true, singleUtterance: false })
+    .on('error', (error) => {
+      console.error(`[STT Error ${sessionId}]`, error.message, error);
+      if (ws.readyState === WebSocket.OPEN) {
+        ws.send(JSON.stringify({ type: 'error', message: error.message }));
+      }
+      if (session.streamErrorRecycled) {
+        closeSession(ws, 'stream_error');
+        return;
+      }
+      session.streamErrorRecycled = true;
+      try {
+        createNewStreamForSession(session, ws);
+        console.log(`[STT] Stream error, recycled new stream for session ${sessionId}`);
+      } catch (e) {
+        console.error('[STT] Stream recycle after error failed:', e);
+        closeSession(ws, 'stream_error');
+      }
+    })
+    .on('data', (data) => {
+      const s = sessions.get(ws);
+      if (!s || !s.stream || !data.results?.length) return;
+      const result = data.results[0];
+      const alt = result.alternatives?.[0];
+      if (!alt?.transcript) return;
+      let speakerTag = null;
+      if (result.isFinal && alt.words?.length) {
+        const tags = alt.words.map(w => w.speakerTag).filter(t => t !== undefined);
+        if (tags.length) speakerTag = tags[tags.length - 1];
+      }
+      const event = {
+        type: result.isFinal ? 'final' : 'partial',
+        text: alt.transcript,
+        speaker: s.speaker,
+        speakerTag,
+        isFinal: result.isFinal || false,
+        confidence: alt.confidence || 0,
+        timestamp: Date.now(),
+      };
+      s.lastActivity = Date.now();
+      if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(event));
+    })
+    .on('end', () => {
+      if (session.stream !== newStream) return;
+      session.stream = null;
+      if (ws.readyState !== WebSocket.OPEN || !sessions.has(ws)) return;
+      try {
+        createNewStreamForSession(session, ws);
+        console.log(`[STT] Stream ended, recycling new stream for session ${sessionId}`);
+      } catch (err) {
+        console.error('[STT] Stream recycle failed:', err);
+        closeSession(ws, 'stream_error');
+      }
+    })
+    .on('close', () => {
+      if (session.stream !== newStream) return;
+      session.stream = null;
+      if (ws.readyState !== WebSocket.OPEN || !sessions.has(ws)) return;
+      try {
+        createNewStreamForSession(session, ws);
+        console.log(`[STT] Stream closed, recycling new stream for session ${sessionId}`);
+      } catch (err) {
+        console.error('[STT] Stream recycle failed:', err);
+        closeSession(ws, 'stream_error');
+      }
+    });
+  session.stream = newStream;
+  session.streamErrorRecycled = false;
+  return newStream;
+}
+
 function handleSTTConnection(ws, req) {
   const url = new URL(req.url || '', `http://${req.headers.host}`);
   const sessionId = url.searchParams.get('session') || `session-${Date.now()}`;
@@ -83,46 +164,19 @@ function handleSTTConnection(ws, req) {
       };
     }
 
-    const stream = client
-      .streamingRecognize({ config, interimResults: true, singleUtterance: false })
-      .on('error', (error) => {
-        console.error(`[STT Error ${sessionId}]`, error.message, error);
-        if (ws.readyState === WebSocket.OPEN) {
-          ws.send(JSON.stringify({ type: 'error', message: error.message }));
-        }
-        closeSession(ws, 'stream_error');
-      })
-      .on('data', (data) => {
-        const session = sessions.get(ws);
-        if (!session || !data.results?.length) return;
-
-        const result = data.results[0];
-        const alt = result.alternatives?.[0];
-        if (!alt?.transcript) return;
-
-        let speakerTag = null;
-        if (result.isFinal && alt.words?.length) {
-          const tags = alt.words.map(w => w.speakerTag).filter(t => t !== undefined);
-          if (tags.length) speakerTag = tags[tags.length - 1];
-        }
-
-        const event = {
-          type: result.isFinal ? 'final' : 'partial',
-          text: alt.transcript,
-          speaker: session.speaker,
-          speakerTag,
-          isFinal: result.isFinal || false,
-          confidence: alt.confidence || 0,
-          timestamp: Date.now(),
-        };
-
-        session.lastActivity = Date.now();
-        if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(event));
-      })
-      .on('end', () => closeSession(ws, 'stream_end'))
-      .on('close', () => closeSession(ws, 'stream_close'));
-
-    sessions.set(ws, { client, stream, speaker, sessionId, lastActivity: Date.now(), totalBytesReceived: 0 });
+    const session = {
+      client,
+      stream: null,
+      speaker,
+      sessionId,
+      lastActivity: Date.now(),
+      totalBytesReceived: 0,
+      config,
+      diarize,
+      streamErrorRecycled: false,
+    };
+    sessions.set(ws, session);
+    createNewStreamForSession(session, ws);
     ws.send(JSON.stringify({ type: 'connected', sessionId, speaker }));
 
   } catch (err) {
@@ -134,7 +188,7 @@ function handleSTTConnection(ws, req) {
 
   ws.on('message', (data) => {
     const session = sessions.get(ws);
-    if (!session) return;
+    if (!session || !session.stream) return;
     try {
       const buffer = Buffer.isBuffer(data) ? data : (typeof data === 'string' ? Buffer.from(data, 'base64') : null);
       if (buffer) {
