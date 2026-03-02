@@ -27,7 +27,6 @@ export interface UseSTTStreamReturn {
   startStream: (speaker: 'salesperson' | 'prospect', stream?: MediaStream, diarize?: boolean) => Promise<void>
   stopStream: () => void
   startAutomatic: () => Promise<void>
-  ensureContextResumed: () => void
   error: string | null
   onSpeechEnd?: (transcript: TranscriptResult) => void
 }
@@ -76,7 +75,6 @@ export function useSTTStream(
   const lastAudioProcessTimeRef = useRef<number>(Date.now())
   const isStreamingRef = useRef(false) // Use ref for stable closure access
   const watchdogIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null)
-  const resumeCheckIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null)
   const streamRefreshIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null)
   const lastPartialTimeRef = useRef<number>(Date.now())
   const onSpeechEndRef = useRef(onSpeechEnd)
@@ -479,42 +477,18 @@ export function useSTTStream(
         }
       }, 1500)
 
-      // No-audio watchdog: when no onaudioprocess callbacks (level effectively 0), try resume first, then restart.
-      // Use 2.5s so TRACE-C recovers sooner and is not dependent on overlay's post-API restart.
+      // No-audio watchdog (hard reset): if no onaudioprocess for 5000ms, force full hardware reset. No soft resume.
       watchdogIntervalRef.current = setInterval(() => {
         const now = Date.now()
         const timeSinceLastAudio = now - lastAudioProcessTimeRef.current
 
-        if (!isStreamingRef.current || timeSinceLastAudio <= 2500) return
+        if (!isStreamingRef.current || timeSinceLastAudio <= 5000) return
 
-        const ctx = audioContextRef.current
-        if (ctx && ctx.state === 'suspended') {
-          // Soft reset: resume context and give callbacks a chance to come back before full restart
-          console.warn(`[WATCHDOG] ${speaker} - No capture for ${timeSinceLastAudio}ms (context suspended). Resuming...`)
-          lastAudioProcessTimeRef.current = now
-          ctx.resume().then(() => {
-            console.log(`[WS STT ${speaker}] AudioContext resumed by watchdog`)
-          }).catch(() => {})
-          return
-        }
-
-        // Context already running but no callbacks → full restart
         console.warn(`[WATCHDOG] ${speaker} - 🔥 NO AUDIO CAPTURE FOR ${timeSinceLastAudio}ms. FORCE RESTARTING...`)
         startAutomatic()
       }, 2000)
 
       console.log(`[WS STT ${speaker}] ✅ Audio processing started (stream active: ${audioStreamToUse.active})`)
-
-      // Periodically resume AudioContext if suspended (e.g. side panel lost focus) so TRACE-C/TRACE-D keep receiving partials/finals
-      if (resumeCheckIntervalRef.current) clearInterval(resumeCheckIntervalRef.current)
-      resumeCheckIntervalRef.current = setInterval(() => {
-        const ctx = audioContextRef.current
-        if (ctx && ctx.state === 'suspended' && isStreamingRef.current) {
-          ctx.resume().then(() => {
-            console.log(`[WS STT ${speaker}] AudioContext resumed (was suspended)`)
-          }).catch(() => { })
-        }
-      }, 1000)
     } catch (err) {
       console.error(`[WS STT ${speaker}] ❌ Error starting stream:`, err)
       setError(err instanceof Error ? err.message : 'Failed to start stream')
@@ -570,10 +544,6 @@ export function useSTTStream(
       clearInterval(watchdogIntervalRef.current)
       watchdogIntervalRef.current = null
     }
-    if (resumeCheckIntervalRef.current) {
-      clearInterval(resumeCheckIntervalRef.current)
-      resumeCheckIntervalRef.current = null
-    }
     if (streamRefreshIntervalRef.current) {
       clearInterval(streamRefreshIntervalRef.current)
       streamRefreshIntervalRef.current = null
@@ -626,34 +596,9 @@ export function useSTTStream(
     }
   }, [stopStream, startStream])
 
-  // Call before API/coaching so AudioContext stays running and TRACE-C doesn't drop during request
-  const ensureContextResumed = useCallback(() => {
-    const ctx = audioContextRef.current
-    if (ctx && ctx.state === 'suspended' && isStreamingRef.current) {
-      ctx.resume().then(() => {
-        console.log('[WS STT] AudioContext resumed before API (was suspended)')
-      }).catch(() => {})
-    }
-  }, [])
-
   useEffect(() => {
     return () => { void stopStream() }
   }, [stopStream])
-
-  // Keep AudioContext running when side panel becomes visible (Chrome often suspends when panel loses focus; no audio = no TRACE-C)
-  useEffect(() => {
-    const onVisibilityChange = () => {
-      if (typeof document === 'undefined' || document.visibilityState !== 'visible') return
-      const ctx = audioContextRef.current
-      if (ctx && ctx.state === 'suspended') {
-        ctx.resume().then(() => {
-          console.log('[WS STT] AudioContext resumed on visibility (was suspended)')
-        }).catch(() => { })
-      }
-    }
-    document.addEventListener('visibilitychange', onVisibilityChange)
-    return () => document.removeEventListener('visibilitychange', onVisibilityChange)
-  }, [])
 
   return {
     isConnected,
@@ -669,7 +614,6 @@ export function useSTTStream(
     stopStream,
     error,
     onSpeechEnd,
-    startAutomatic,
-    ensureContextResumed
+    startAutomatic
   }
 }

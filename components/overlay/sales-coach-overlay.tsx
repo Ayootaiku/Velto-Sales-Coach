@@ -609,10 +609,6 @@ export function SalesCoachOverlay() {
     addLog(`[Trace] Step C: Coach Request Started (Turn: ${nextTurnId}, Session: ${prospectStream.sessionId})`)
     updateTrace({ C: true, turnId: nextTurnId })
 
-    // Keep AudioContext running during API call so TRACE-C partials don't drop
-    prospectStream.ensureContextResumed()
-    salespersonStream.ensureContextResumed()
-
     // Track timeout to clear it if API responds successfully
     let timeoutId: ReturnType<typeof setTimeout> | null = null
     let hasCompleted = false
