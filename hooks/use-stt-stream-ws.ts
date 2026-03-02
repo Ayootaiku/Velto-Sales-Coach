@@ -188,18 +188,15 @@ export function useSTTStream(
       // Get audio stream
       let audioStreamToUse: MediaStream
       if (audioStream) {
-        // VALIDATION: If using existing stream, ensure it's actually alive
+        // VALIDATION: If caller provided a stream, it must be live. Do NOT fall back to mic (would be wrong for prospect/tab audio).
         const tracks = audioStream.getTracks()
         const isActive = audioStream.active && tracks.length > 0 && tracks.every(t => t.readyState === 'live')
 
         if (!isActive) {
-          console.warn(`[WS STT ${speaker}] Existing stream is DEAD or INACTIVE. Requesting fresh stream...`)
-          // Fall through to getUserMedia logic below by not assigning it
-          audioStream = undefined as any
+          const msg = 'Provided media stream is inactive or ended. Please share the tab again.'
+          console.warn(`[WS STT ${speaker}] ${msg}`)
+          throw new Error(msg)
         }
-      }
-
-      if (audioStream) {
         audioStreamToUse = audioStream
       } else {
         audioStreamToUse = await navigator.mediaDevices.getUserMedia({
@@ -330,12 +327,18 @@ export function useSTTStream(
       }
 
       // Set up Web Audio API for PCM capture
-      // 1. Recycle existing AudioContext if possible (must be NOT closed)
-      let audioContext = audioContextRef.current
-      if (!audioContext || audioContext.state === 'closed') {
-        audioContext = new (window.AudioContext || (window as any).webkitAudioContext)()
-        audioContextRef.current = audioContext
+      // Always create a new AudioContext so every session is fresh (avoids "works once" after refresh).
+      const existingCtx = audioContextRef.current
+      if (existingCtx) {
+        try {
+          if (existingCtx.state !== 'closed') await existingCtx.close()
+        } catch (e) {
+          console.warn('[WS STT] Error closing existing AudioContext:', e)
+        }
+        audioContextRef.current = null
       }
+      const audioContext = new (window.AudioContext || (window as any).webkitAudioContext)()
+      audioContextRef.current = audioContext
 
       if (audioContext.state === 'suspended') {
         console.log(`[WS STT ${speaker}] Resuming AudioContext...`)
@@ -346,8 +349,6 @@ export function useSTTStream(
         }
       }
       console.log(`[WS STT ${speaker}] AudioContext state: ${audioContext.state}`)
-
-      audioContextRef.current = audioContext
 
       // 2. Add a GainNode to boost the signal slightly for Google STT
       const gainNode = audioContext.createGain()
@@ -461,21 +462,33 @@ export function useSTTStream(
       isStreamingRef.current = true
       lastAudioProcessTimeRef.current = Date.now()
 
-      // No-audio watchdog: restart if browser stops delivering onaudioprocess (e.g. suspended AudioContext).
-      // Use 2.5s (not 5s) so TRACE-C recovers sooner and is not dependent on overlay's post-API restart.
+      // No-audio watchdog: when no onaudioprocess callbacks (level effectively 0), try resume first, then restart.
+      // Use 2.5s so TRACE-C recovers sooner and is not dependent on overlay's post-API restart.
       watchdogIntervalRef.current = setInterval(() => {
         const now = Date.now()
         const timeSinceLastAudio = now - lastAudioProcessTimeRef.current
 
-        if (isStreamingRef.current && timeSinceLastAudio > 2500) {
-          console.warn(`[WATCHDOG] ${speaker} - 🔥 NO AUDIO CAPTURE FOR ${timeSinceLastAudio}ms. FORCE RESTARTING...`)
-          startAutomatic()
+        if (!isStreamingRef.current || timeSinceLastAudio <= 2500) return
+
+        const ctx = audioContextRef.current
+        if (ctx && ctx.state === 'suspended') {
+          // Soft reset: resume context and give callbacks a chance to come back before full restart
+          console.warn(`[WATCHDOG] ${speaker} - No capture for ${timeSinceLastAudio}ms (context suspended). Resuming...`)
+          lastAudioProcessTimeRef.current = now
+          ctx.resume().then(() => {
+            console.log(`[WS STT ${speaker}] AudioContext resumed by watchdog`)
+          }).catch(() => {})
+          return
         }
+
+        // Context already running but no callbacks → full restart
+        console.warn(`[WATCHDOG] ${speaker} - 🔥 NO AUDIO CAPTURE FOR ${timeSinceLastAudio}ms. FORCE RESTARTING...`)
+        startAutomatic()
       }, 2000)
 
       console.log(`[WS STT ${speaker}] ✅ Audio processing started (stream active: ${audioStreamToUse.active})`)
 
-      // Periodically resume AudioContext if suspended (e.g. side panel lost focus) so TRACE-C/TRACE-D can receive partials/finals
+      // Periodically resume AudioContext if suspended (e.g. side panel lost focus) so TRACE-C/TRACE-D keep receiving partials/finals
       if (resumeCheckIntervalRef.current) clearInterval(resumeCheckIntervalRef.current)
       resumeCheckIntervalRef.current = setInterval(() => {
         const ctx = audioContextRef.current
@@ -484,7 +497,7 @@ export function useSTTStream(
             console.log(`[WS STT ${speaker}] AudioContext resumed (was suspended)`)
           }).catch(() => { })
         }
-      }, 3000)
+      }, 1000)
     } catch (err) {
       console.error(`[WS STT ${speaker}] ❌ Error starting stream:`, err)
       setError(err instanceof Error ? err.message : 'Failed to start stream')
@@ -501,6 +514,10 @@ export function useSTTStream(
     setIsStreaming(false)
     isStreamingRef.current = false
     reconnectAttemptsRef.current = 0
+
+    // Reset refs so next start does not immediately trigger watchdog or stale UI
+    lastAudioProcessTimeRef.current = Date.now()
+    lastActiveTimeRef.current = Date.now()
 
     if (wsRef.current) {
       wsRef.current.onclose = null // Prevent triggering auto-reconnect

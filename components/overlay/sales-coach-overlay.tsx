@@ -938,9 +938,23 @@ export function SalesCoachOverlay() {
         return null
       }
 
+      // Validate stream is live before start (avoids TRACE-C/audio bar failing after refresh)
+      if (audioTrack.readyState !== 'live' || !stream.active) {
+        addLog("❌ Tab share is inactive or ended. Please click Start and share the tab again.")
+        stream.getTracks().forEach((t: MediaStreamTrack) => t.stop())
+        return null
+      }
+
       addLog("✅ Audio track captured")
       const audioStream = new MediaStream([audioTrack])
-      await prospectStream.startStream('prospect', audioStream)
+      try {
+        await prospectStream.startStream('prospect', audioStream)
+      } catch (startErr: any) {
+        const msg = startErr?.message || String(startErr)
+        addLog(`❌ ${msg.includes('inactive') || msg.includes('ended') ? 'Tab share ended — please click Start and share the tab again.' : msg}`)
+        stream.getTracks().forEach((t: MediaStreamTrack) => t.stop())
+        return null
+      }
 
       // FIXED: Don't stop stream when audio track ends - it might be temporary
       // Only stop when user explicitly ends the call
@@ -1084,7 +1098,7 @@ export function SalesCoachOverlay() {
       setCards([{
         id: 'error-' + Date.now(),
         suggestion: "⚠️ Prospect audio not captured",
-        reason: "Click 'Share Session' and CHECK 'Share tab audio' in terminal popup",
+        reason: "Click Start and choose the tab with prospect audio (check Share tab audio).",
         type: 'reframe'
       }])
     }
