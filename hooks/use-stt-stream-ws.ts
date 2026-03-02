@@ -77,6 +77,8 @@ export function useSTTStream(
   const isStreamingRef = useRef(false) // Use ref for stable closure access
   const watchdogIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null)
   const resumeCheckIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null)
+  const streamRefreshIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null)
+  const lastPartialTimeRef = useRef<number>(Date.now())
   const onSpeechEndRef = useRef(onSpeechEnd)
   const onSpeakerTurnRef = useRef(onSpeakerTurn)
   const isDiarizedRef = useRef(false)
@@ -281,6 +283,7 @@ export function useSTTStream(
             }
           } else if (data.type === 'partial') {
             // TRACE C: gotPartial
+            lastPartialTimeRef.current = Date.now()
             console.log(`[TRACE-C] ${speaker} - Got partial:`, data.text.substring(0, 30))
             const result: TranscriptResult = {
               text: data.text,
@@ -461,6 +464,20 @@ export function useSTTStream(
       setIsStreaming(true)
       isStreamingRef.current = true
       lastAudioProcessTimeRef.current = Date.now()
+      lastPartialTimeRef.current = Date.now()
+
+      // Periodic stream refresh: if no partial (TRACE-C) in 3s while streaming, restart so stream stays ready after prospect responds.
+      if (streamRefreshIntervalRef.current) clearInterval(streamRefreshIntervalRef.current)
+      streamRefreshIntervalRef.current = setInterval(() => {
+        if (!isStreamingRef.current) return
+        const now = Date.now()
+        const idleMs = now - lastPartialTimeRef.current
+        if (idleMs > 3000) {
+          console.warn(`[STREAM REFRESH] ${speaker} - No partial in ${Math.round(idleMs / 1000)}s. Restarting stream for next prospect speech...`)
+          lastPartialTimeRef.current = now
+          startAutomatic()
+        }
+      }, 1500)
 
       // No-audio watchdog: when no onaudioprocess callbacks (level effectively 0), try resume first, then restart.
       // Use 2.5s so TRACE-C recovers sooner and is not dependent on overlay's post-API restart.
@@ -556,6 +573,10 @@ export function useSTTStream(
     if (resumeCheckIntervalRef.current) {
       clearInterval(resumeCheckIntervalRef.current)
       resumeCheckIntervalRef.current = null
+    }
+    if (streamRefreshIntervalRef.current) {
+      clearInterval(streamRefreshIntervalRef.current)
+      streamRefreshIntervalRef.current = null
     }
 
     if (streamRef.current && !keepTracks) {
