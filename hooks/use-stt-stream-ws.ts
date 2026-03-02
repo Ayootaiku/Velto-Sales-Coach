@@ -597,7 +597,13 @@ export function useSTTStream(
   }, [stopStream, startStream])
 
   useEffect(() => {
-    return () => { void stopStream() }
+    return () => {
+      // In extension side panel, do not stop stream on unmount (e.g. panel hide/recreate).
+      // Otherwise the trace (A→E) is killed and "LISTENING" breaks. Stream only stops on End Call or startAutomatic.
+      const inExtension = typeof chrome !== 'undefined' && !!chrome.runtime?.id
+      if (inExtension && isStreamingRef.current) return
+      void stopStream()
+    }
   }, [stopStream])
 
   return {
