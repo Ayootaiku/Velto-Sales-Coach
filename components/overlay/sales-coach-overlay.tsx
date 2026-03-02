@@ -687,18 +687,7 @@ export function SalesCoachOverlay() {
       addLog(`[Trace] Step E: Card Rendered (Turn: ${trace.turnId}, ID: ${streamingCardId})`)
       updateTrace({ E: true, cardId: streamingCardId })
 
-      // AUTO-START NEW STREAM: Now that AI has responded, start a fresh prospect stream
-      console.log(`[Prospect AI Response] 🔄 Turn complete. Starting NEW prospect stream...`)
-      if (isDiarized) {
-        // Force Hardware Reset after AI card to ensure clean state
-        addLog("⚡ SYSTEM: HARDWARE RESET (Immediate Post-Response)...")
-        setTimeout(() => {
-          console.warn("[IN-ROOM WATCHDOG] 🔄 Refreshing audio pulse to prevent timeout...")
-          salespersonStream.startAutomatic()
-        }, 100)
-      } else {
-        prospectStream.startAutomatic()
-      }
+      // Rely on same WebSocket + hook watchdogs (no-audio 5s, silent buffer 4s, connection-health 20s) instead of post-turn restart
 
     } catch (e) {
       addLog(`❌ AI Error: ${e}`)
@@ -734,9 +723,7 @@ export function SalesCoachOverlay() {
       addLog(`[Trace] Step E: Card Rendered (Turn: ${trace.turnId}, ID: ${cardId})`)
       updateTrace({ E: true, cardId })
 
-      // AUTO-START NEW STREAM even on error to keep the loop going
-      console.log(`[Prospect AI Error] 🔄 Error turn complete. Starting NEW prospect stream...`)
-      prospectStream.startAutomatic()
+      // Rely on same WebSocket + hook watchdogs; no post-turn restart on error
     }
   }, [addLog, prospectStream.isConnected, prospectStream.isStreaming, updateTrace, salespersonStream, trace.turnId, prospectStream.sessionId, isDiarized])
 
@@ -877,6 +864,35 @@ export function SalesCoachOverlay() {
       }
     }
   }, [prospectStream.isConnected, status, addLog, updateTrace, trace.A, prospectStream.sessionId])
+
+  // Connection-dead recovery: if we're listening/coaching but not connected for 5–8s, force full restart once
+  const connectionDeadRecoveryTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const connectionDeadRecoveryFiredRef = useRef(false)
+  useEffect(() => {
+    if (prospectStream.isConnected) {
+      if (connectionDeadRecoveryTimerRef.current) {
+        clearTimeout(connectionDeadRecoveryTimerRef.current)
+        connectionDeadRecoveryTimerRef.current = null
+      }
+      connectionDeadRecoveryFiredRef.current = false
+      return
+    }
+    if (status !== 'listening' && status !== 'coaching') return
+    if (connectionDeadRecoveryFiredRef.current) return
+    connectionDeadRecoveryTimerRef.current = setTimeout(() => {
+      connectionDeadRecoveryTimerRef.current = null
+      if (prospectStream.isConnected || (status !== 'listening' && status !== 'coaching')) return
+      connectionDeadRecoveryFiredRef.current = true
+      addLog('🔄 Connection dead 7s — forcing full restart (prospect stream)')
+      prospectStream.startAutomatic()
+    }, 7000)
+    return () => {
+      if (connectionDeadRecoveryTimerRef.current) {
+        clearTimeout(connectionDeadRecoveryTimerRef.current)
+        connectionDeadRecoveryTimerRef.current = null
+      }
+    }
+  }, [status, prospectStream.isConnected, prospectStream.startAutomatic, addLog])
 
   const speechRecognition = useSpeechRecognition({
     onTranscript: (text) => {

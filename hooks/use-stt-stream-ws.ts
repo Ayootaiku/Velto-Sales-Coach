@@ -75,6 +75,8 @@ export function useSTTStream(
   const lastAudioProcessTimeRef = useRef<number>(Date.now())
   const isStreamingRef = useRef(false) // Use ref for stable closure access
   const watchdogIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null)
+  const healthCheckIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null)
+  const lastServerMessageTimeRef = useRef<number>(0)
   const onSpeechEndRef = useRef(onSpeechEnd)
   const onSpeakerTurnRef = useRef(onSpeakerTurn)
   const isDiarizedRef = useRef(false)
@@ -93,6 +95,8 @@ export function useSTTStream(
   }, [onSpeakerTurn])
 
   const MAX_RECONNECT_ATTEMPTS = 999999 // Effectively infinite to avoid "secret" timeouts
+  const CONNECTION_HEALTH_CHECK_MS = 15000 // Check every 15s
+  const CONNECTION_HEALTH_DEAD_MS = 20000 // No server message for 20s → full restart
 
   // Resample audio from input sample rate to 16000Hz
   const resampleAudio = useCallback((inputBuffer: Float32Array, inputSampleRate: number): Int16Array => {
@@ -214,14 +218,20 @@ export function useSTTStream(
       wsRef.current = ws
       setIsConnected(true)
       setError(null)
+      lastServerMessageTimeRef.current = Date.now()
 
-      ws.onmessage = (event) => {
+      const messageHandler = (event: MessageEvent) => {
         try {
           const data = JSON.parse(event.data)
+          lastServerMessageTimeRef.current = Date.now()
 
           if (data.type === 'connected') {
             console.log(`[TRACE-B] ${speaker} - STT stream CREATED`)
             reconnectAttemptsRef.current = 0 // Reset attempts on successful connection
+            return
+          }
+
+          if (data.type === 'heartbeat') {
             return
           }
 
@@ -295,33 +305,45 @@ export function useSTTStream(
         }
       }
 
-      ws.onclose = () => {
+      const closeHandler = () => {
         // TRACE E: sttStreamEnded (WebSocket close)
         console.log(`[TRACE-E] ${speaker} - WebSocket CLOSED (finals received: ${transcriptCountRef.current})`)
         setIsConnected(false)
 
-        // Auto-reconnect logic
-        if (isStreaming && reconnectAttemptsRef.current < MAX_RECONNECT_ATTEMPTS) {
+        // Auto-reconnect with fresh session ID and re-attach handlers so reconnects can repeat
+        if (isStreamingRef.current && reconnectAttemptsRef.current < MAX_RECONNECT_ATTEMPTS) {
           reconnectAttemptsRef.current++
+          const delay = 1000 * reconnectAttemptsRef.current
 
           setTimeout(async () => {
             try {
               if (!streamRef.current) return
-              const newWs = await connectWebSocket(speaker, newSessionId, isDiarizedRef.current)
+              const newSessionIdForReconnect = `${speaker}-${Date.now()}-${Math.random().toString(36).substring(2, 8)}`
+              sessionIdRef.current = newSessionIdForReconnect
+              const newWs = await connectWebSocket(speaker, newSessionIdForReconnect, isDiarizedRef.current)
               wsRef.current = newWs
               setIsConnected(true)
-
-              // Re-attach message handler
-              newWs.onmessage = ws.onmessage
+              newWs.onmessage = messageHandler
+              newWs.onclose = closeHandler
+              newWs.onerror = () => {
+                try { newWs.close() } catch (_) { /* no-op */ }
+              }
             } catch (err) {
               console.error(`[WS STT ${speaker}] ❌ Reconnect failed:`, err)
               if (reconnectAttemptsRef.current >= MAX_RECONNECT_ATTEMPTS) {
+                isStreamingRef.current = false
                 setIsStreaming(false)
                 setError('WebSocket connection lost. Please restart session.')
               }
             }
-          }, 1000 * reconnectAttemptsRef.current) // Exponential backoff: 1s, 2s, 3s
+          }, delay)
         }
+      }
+
+      ws.onmessage = messageHandler
+      ws.onclose = closeHandler
+      ws.onerror = () => {
+        try { ws.close() } catch (_) { /* no-op */ }
       }
 
       // Set up Web Audio API for PCM capture
@@ -472,6 +494,17 @@ export function useSTTStream(
         }
       }, 2000)
 
+      // Connection-health watchdog: if server stops sending anything (e.g. proxy, stuck stream), full restart
+      if (healthCheckIntervalRef.current) clearInterval(healthCheckIntervalRef.current)
+      healthCheckIntervalRef.current = setInterval(() => {
+        const now = Date.now()
+        const timeSinceLastServerMessage = now - lastServerMessageTimeRef.current
+        if (lastServerMessageTimeRef.current > 0 && isStreamingRef.current && timeSinceLastServerMessage > CONNECTION_HEALTH_DEAD_MS) {
+          console.warn(`[WATCHDOG] ${speaker} - No server message for ${timeSinceLastServerMessage}ms. FORCE RESTARTING...`)
+          startAutomatic()
+        }
+      }, CONNECTION_HEALTH_CHECK_MS)
+
       console.log(`[WS STT ${speaker}] ✅ Audio processing started (stream active: ${audioStreamToUse.active})`)
     } catch (err) {
       console.error(`[WS STT ${speaker}] ❌ Error starting stream:`, err)
@@ -527,6 +560,10 @@ export function useSTTStream(
     if (watchdogIntervalRef.current) {
       clearInterval(watchdogIntervalRef.current)
       watchdogIntervalRef.current = null
+    }
+    if (healthCheckIntervalRef.current) {
+      clearInterval(healthCheckIntervalRef.current)
+      healthCheckIntervalRef.current = null
     }
 
     if (streamRef.current && !keepTracks) {
