@@ -879,6 +879,7 @@ export function SalesCoachOverlay() {
     }
     if (status !== 'listening' && status !== 'coaching') return
     if (connectionDeadRecoveryFiredRef.current) return
+    addLog('⚠️ Prospect disconnected; recovery in 7s if still disconnected')
     connectionDeadRecoveryTimerRef.current = setTimeout(() => {
       connectionDeadRecoveryTimerRef.current = null
       if (prospectStream.isConnected || (status !== 'listening' && status !== 'coaching')) return

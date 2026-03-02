@@ -314,6 +314,7 @@ export function useSTTStream(
         if (isStreamingRef.current && reconnectAttemptsRef.current < MAX_RECONNECT_ATTEMPTS) {
           reconnectAttemptsRef.current++
           const delay = 1000 * reconnectAttemptsRef.current
+          console.log(`[WATCHDOG] ${speaker} - 🔄 Reconnecting in ${delay}ms (attempt ${reconnectAttemptsRef.current})...`)
 
           setTimeout(async () => {
             try {
@@ -328,6 +329,7 @@ export function useSTTStream(
               newWs.onerror = () => {
                 try { newWs.close() } catch (_) { /* no-op */ }
               }
+              console.log(`[WATCHDOG] ${speaker} - ✅ Reconnect succeeded (session: ${newSessionIdForReconnect})`)
             } catch (err) {
               console.error(`[WS STT ${speaker}] ❌ Reconnect failed:`, err)
               if (reconnectAttemptsRef.current >= MAX_RECONNECT_ATTEMPTS) {
@@ -337,6 +339,10 @@ export function useSTTStream(
               }
             }
           }, delay)
+        } else {
+          if (!isStreamingRef.current) {
+            console.log(`[WATCHDOG] ${speaker} - Not reconnecting (stream intentionally stopped)`)
+          }
         }
       }
 
@@ -506,6 +512,7 @@ export function useSTTStream(
       }, CONNECTION_HEALTH_CHECK_MS)
 
       console.log(`[WS STT ${speaker}] ✅ Audio processing started (stream active: ${audioStreamToUse.active})`)
+      console.log(`[WATCHDOG] ${speaker} - Watchdogs active: no-audio 5s, silent-buffer 4s, connection-health 20s`)
     } catch (err) {
       console.error(`[WS STT ${speaker}] ❌ Error starting stream:`, err)
       setError(err instanceof Error ? err.message : 'Failed to start stream')
