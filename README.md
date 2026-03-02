@@ -7,3 +7,7 @@ Sales Coach UI + GPT-4o Agent
 - Endpoints:
   - POST /app/api/sales-agent
 - Patch notes available in the PR diff.
+
+### Extension (Velto Sales Coach side panel)
+
+Watchdog and recovery logic runs in the client (hook + overlay). To get the latest in the Chrome extension: run `pnpm run ext:build`, then Reload the extension in chrome://extensions. In the side panel console you should see `[WATCHDOG] *** ENABLED ***` when the stream starts and `[WATCHDOG] prospect - alive` every 30s.

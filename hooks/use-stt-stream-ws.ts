@@ -77,6 +77,7 @@ export function useSTTStream(
   const watchdogIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null)
   const healthCheckIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null)
   const lastServerMessageTimeRef = useRef<number>(0)
+  const watchdogAliveIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null)
   const onSpeechEndRef = useRef(onSpeechEnd)
   const onSpeakerTurnRef = useRef(onSpeakerTurn)
   const isDiarizedRef = useRef(false)
@@ -94,9 +95,11 @@ export function useSTTStream(
     onSpeakerTurnRef.current = onSpeakerTurn
   }, [onSpeakerTurn])
 
-  const MAX_RECONNECT_ATTEMPTS = 999999 // Effectively infinite to avoid "secret" timeouts
+  const MAX_RECONNECT_ATTEMPTS = 999999 // Effectively infinite — never give up until user stops session
+  const MAX_RECONNECT_DELAY_MS = 2000 // Cap delay so recovery stays quick (was 1s, 2s, 3s... forever)
   const CONNECTION_HEALTH_CHECK_MS = 15000 // Check every 15s
   const CONNECTION_HEALTH_DEAD_MS = 20000 // No server message for 20s → full restart
+  const WATCHDOG_ALIVE_LOG_MS = 30000 // Log "watchdog alive" every 30s so user sees new code is loaded
 
   // Resample audio from input sample rate to 16000Hz
   const resampleAudio = useCallback((inputBuffer: Float32Array, inputSampleRate: number): Int16Array => {
@@ -313,7 +316,7 @@ export function useSTTStream(
         // Auto-reconnect with fresh session ID and re-attach handlers so reconnects can repeat
         if (isStreamingRef.current && reconnectAttemptsRef.current < MAX_RECONNECT_ATTEMPTS) {
           reconnectAttemptsRef.current++
-          const delay = 1000 * reconnectAttemptsRef.current
+          const delay = Math.min(1000 * reconnectAttemptsRef.current, MAX_RECONNECT_DELAY_MS)
           console.log(`[WATCHDOG] ${speaker} - 🔄 Reconnecting in ${delay}ms (attempt ${reconnectAttemptsRef.current})...`)
 
           setTimeout(async () => {
@@ -512,7 +515,18 @@ export function useSTTStream(
       }, CONNECTION_HEALTH_CHECK_MS)
 
       console.log(`[WS STT ${speaker}] ✅ Audio processing started (stream active: ${audioStreamToUse.active})`)
+      console.warn(`[WATCHDOG] *** ENABLED *** ${speaker}: Reconnect on close | No-audio 5s | Silent-buffer 4s | Connection-health 20s | Overlay recovery 7s`)
       console.log(`[WATCHDOG] ${speaker} - Watchdogs active: no-audio 5s, silent-buffer 4s, connection-health 20s`)
+
+      // Periodic "watchdog alive" log so user can confirm new code is running (every 30s)
+      if (watchdogAliveIntervalRef.current) clearInterval(watchdogAliveIntervalRef.current)
+      watchdogAliveIntervalRef.current = setInterval(() => {
+        if (isStreamingRef.current) {
+          const noAudio = Math.round((Date.now() - lastAudioProcessTimeRef.current) / 1000)
+          const noServer = lastServerMessageTimeRef.current > 0 ? Math.round((Date.now() - lastServerMessageTimeRef.current) / 1000) : -1
+          console.log(`[WATCHDOG] ${speaker} - alive | last audio ${noAudio}s ago | last server msg ${noServer >= 0 ? noServer + 's ago' : 'n/a'}`)
+        }
+      }, WATCHDOG_ALIVE_LOG_MS)
     } catch (err) {
       console.error(`[WS STT ${speaker}] ❌ Error starting stream:`, err)
       setError(err instanceof Error ? err.message : 'Failed to start stream')
@@ -571,6 +585,10 @@ export function useSTTStream(
     if (healthCheckIntervalRef.current) {
       clearInterval(healthCheckIntervalRef.current)
       healthCheckIntervalRef.current = null
+    }
+    if (watchdogAliveIntervalRef.current) {
+      clearInterval(watchdogAliveIntervalRef.current)
+      watchdogAliveIntervalRef.current = null
     }
 
     if (streamRef.current && !keepTracks) {
