@@ -100,6 +100,7 @@ export function useSTTStream(
   const CONNECTION_HEALTH_CHECK_MS = 15000 // Check every 15s
   const CONNECTION_HEALTH_DEAD_MS = 20000 // No server message for 20s → full restart
   const WATCHDOG_ALIVE_LOG_MS = 30000 // Log "watchdog alive" every 30s so user sees new code is loaded
+  const SILENCE_HARD_RESET_MS = 8000 // Prolonged silence (no real audio) → hard reset to refresh capture
 
   // Resample audio from input sample rate to 16000Hz
   const resampleAudio = useCallback((inputBuffer: Float32Array, inputSampleRate: number): Int16Array => {
@@ -291,7 +292,8 @@ export function useSTTStream(
               onSpeechEndRef.current(result)
             }
           } else if (data.type === 'partial') {
-            // TRACE C: gotPartial
+            // TRACE C: gotPartial — keep backoff reset so next disconnect recovers quickly
+            reconnectAttemptsRef.current = 0
             console.log(`[TRACE-C] ${speaker} - Got partial:`, data.text.substring(0, 30))
             const result: TranscriptResult = {
               text: data.text,
@@ -426,6 +428,14 @@ export function useSTTStream(
         if (now - lastActiveTimeRef.current > 4000 && isStreamingRef.current) {
           console.warn(`[SILENT BUFFER BUG] ${speaker} - Buffer is 0.0000. FORCING HARDWARE RESET...`)
           lastActiveTimeRef.current = now // Prevent loop
+          startAutomatic()
+          return
+        }
+
+        // Prolonged silence (no real audio for 8s) → hard reset so capture/stream stays responsive
+        if (now - lastActiveTimeRef.current > SILENCE_HARD_RESET_MS && isStreamingRef.current) {
+          console.warn(`[SILENCE DETECTED] ${speaker} - No speech for ${SILENCE_HARD_RESET_MS / 1000}s. HARDWARE RESET...`)
+          lastActiveTimeRef.current = now
           startAutomatic()
           return
         }
