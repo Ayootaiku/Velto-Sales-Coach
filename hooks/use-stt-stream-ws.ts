@@ -100,7 +100,7 @@ export function useSTTStream(
   const CONNECTION_HEALTH_CHECK_MS = 15000 // Check every 15s
   const CONNECTION_HEALTH_DEAD_MS = 20000 // No server message for 20s → full restart
   const WATCHDOG_ALIVE_LOG_MS = 30000 // Log "watchdog alive" every 30s so user sees new code is loaded
-  const SILENCE_HARD_RESET_MS = 8000 // Prolonged silence (no real audio) → hard reset to refresh capture
+  // We do NOT restart on silence (4s/8s) — that was killing the connection; only restart on no callbacks (15s) or no server msg (20s).
 
   // Resample audio from input sample rate to 16000Hz
   const resampleAudio = useCallback((inputBuffer: Float32Array, inputSampleRate: number): Int16Array => {
@@ -426,21 +426,7 @@ export function useSTTStream(
           lastActiveTimeRef.current = now
         }
 
-        // Detect silent buffer bug: If RMS is exactly 0 for 4 seconds, the browser audio stack is stuck
-        if (now - lastActiveTimeRef.current > 4000 && isStreamingRef.current) {
-          console.warn(`[SILENT BUFFER BUG] ${speaker} - Buffer is 0.0000. FORCING HARDWARE RESET...`)
-          lastActiveTimeRef.current = now // Prevent loop
-          startAutomatic()
-          return
-        }
-
-        // Prolonged silence (no real audio for 8s) → hard reset so capture/stream stays responsive
-        if (now - lastActiveTimeRef.current > SILENCE_HARD_RESET_MS && isStreamingRef.current) {
-          console.warn(`[SILENCE DETECTED] ${speaker} - No speech for ${SILENCE_HARD_RESET_MS / 1000}s. HARDWARE RESET...`)
-          lastActiveTimeRef.current = now
-          startAutomatic()
-          return
-        }
+        // Do NOT restart on silence (4s/8s zero RMS) — keeps connection up so prospectStream.isConnected stays true; only no-audio 15s and connection-health 20s trigger restart.
 
         // Log pulse every ~5 seconds to show activity
         if (now % 5000 < 100) {
@@ -528,8 +514,8 @@ export function useSTTStream(
       }, CONNECTION_HEALTH_CHECK_MS)
 
       console.log(`[WS STT ${speaker}] ✅ Audio processing started (stream active: ${audioStreamToUse.active})`)
-      console.warn(`[WATCHDOG] *** ENABLED *** ${speaker}: Reconnect on close | No-audio 15s | Silent-buffer 4s | Connection-health 20s | Overlay recovery 7s`)
-      console.log(`[WATCHDOG] ${speaker} - Watchdogs active: no-audio 15s, silent-buffer 4s, connection-health 20s`)
+      console.warn(`[WATCHDOG] *** ENABLED *** ${speaker}: Reconnect on close | No-audio 15s | Connection-health 20s | Overlay recovery 7s (no silence restart)`)
+      console.log(`[WATCHDOG] ${speaker} - Watchdogs active: no-audio 15s, connection-health 20s`)
 
       // Periodic "watchdog alive" log so user can confirm new code is running (every 30s)
       if (watchdogAliveIntervalRef.current) clearInterval(watchdogAliveIntervalRef.current)
