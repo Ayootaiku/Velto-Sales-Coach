@@ -310,9 +310,11 @@ export function useSTTStream(
         }
       }
 
-      const closeHandler = () => {
-        // TRACE E: sttStreamEnded (WebSocket close)
-        console.log(`[TRACE-E] ${speaker} - WebSocket CLOSED (finals received: ${transcriptCountRef.current})`)
+      const closeHandler = (e?: CloseEvent) => {
+        // TRACE E: sttStreamEnded (WebSocket close) — log code/reason to see who closed (1000=normal, 1006=abnormal/dropped)
+        const code = e?.code ?? '?'
+        const reason = e?.reason ?? '?'
+        console.log(`[TRACE-E] ${speaker} - WebSocket CLOSED code=${code} reason=${reason} (finals received: ${transcriptCountRef.current})`)
         setIsConnected(false)
 
         // Auto-reconnect with fresh session ID and re-attach handlers so reconnects can repeat
@@ -507,7 +509,8 @@ export function useSTTStream(
         const now = Date.now()
         const timeSinceLastAudio = now - lastAudioProcessTimeRef.current
 
-        if (isStreamingRef.current && timeSinceLastAudio > 5000) {
+        // Only restart if no audio callbacks for 15s (was 5s — avoid killing during tab throttle or slow capture start)
+        if (isStreamingRef.current && timeSinceLastAudio > 15000) {
           console.warn(`[WATCHDOG] ${speaker} - 🔥 NO AUDIO CAPTURE FOR ${timeSinceLastAudio}ms. FORCE RESTARTING...`)
           startAutomatic()
         }
@@ -525,8 +528,8 @@ export function useSTTStream(
       }, CONNECTION_HEALTH_CHECK_MS)
 
       console.log(`[WS STT ${speaker}] ✅ Audio processing started (stream active: ${audioStreamToUse.active})`)
-      console.warn(`[WATCHDOG] *** ENABLED *** ${speaker}: Reconnect on close | No-audio 5s | Silent-buffer 4s | Connection-health 20s | Overlay recovery 7s`)
-      console.log(`[WATCHDOG] ${speaker} - Watchdogs active: no-audio 5s, silent-buffer 4s, connection-health 20s`)
+      console.warn(`[WATCHDOG] *** ENABLED *** ${speaker}: Reconnect on close | No-audio 15s | Silent-buffer 4s | Connection-health 20s | Overlay recovery 7s`)
+      console.log(`[WATCHDOG] ${speaker} - Watchdogs active: no-audio 15s, silent-buffer 4s, connection-health 20s`)
 
       // Periodic "watchdog alive" log so user can confirm new code is running (every 30s)
       if (watchdogAliveIntervalRef.current) clearInterval(watchdogAliveIntervalRef.current)
