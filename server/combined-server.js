@@ -18,6 +18,14 @@ if (process.env.GOOGLE_APPLICATION_CREDENTIALS_JSON && !fs.existsSync(process.en
   console.log('[Combined] Loaded Google credentials from env var');
 }
 
+// Prevent uncaught errors from killing the process (which would drop all WS with 1006)
+process.on('uncaughtException', (err) => {
+  console.error('[Combined] uncaughtException:', err?.message || err);
+});
+process.on('unhandledRejection', (reason, p) => {
+  console.error('[Combined] unhandledRejection:', reason);
+});
+
 const PORT = parseInt(process.env.PORT) || 3000;
 const dev = false;
 const app = next({ dev });
@@ -47,7 +55,10 @@ function closeSession(ws, reason) {
     console.log(`[STT] Session closed: ${session.sessionId} reason=${reason || 'unknown'}`);
     sessions.delete(ws);
   }
-  if (ws.readyState === WebSocket.OPEN) ws.close();
+  // Send proper close frame (1000) so client sees normal close, not 1006
+  if (ws.readyState === WebSocket.OPEN) {
+    try { ws.close(1000, reason || 'session_closed'); } catch (e) { /* ignore */ }
+  }
 }
 
 /** Create a new Google STT stream for an existing session; keeps WebSocket open for whole call. */
@@ -93,27 +104,31 @@ function createNewStreamForSession(session, ws) {
       });
     })
     .on('data', (data) => {
-      const s = sessions.get(ws);
-      if (!s || !s.stream || !data.results?.length) return;
-      const result = data.results[0];
-      const alt = result.alternatives?.[0];
-      if (!alt?.transcript) return;
-      let speakerTag = null;
-      if (result.isFinal && alt.words?.length) {
-        const tags = alt.words.map(w => w.speakerTag).filter(t => t !== undefined);
-        if (tags.length) speakerTag = tags[tags.length - 1];
+      try {
+        const s = sessions.get(ws);
+        if (!s || !s.stream || !data.results?.length) return;
+        const result = data.results[0];
+        const alt = result.alternatives?.[0];
+        if (!alt?.transcript) return;
+        let speakerTag = null;
+        if (result.isFinal && alt.words?.length) {
+          const tags = alt.words.map(w => w.speakerTag).filter(t => t !== undefined);
+          if (tags.length) speakerTag = tags[tags.length - 1];
+        }
+        const event = {
+          type: result.isFinal ? 'final' : 'partial',
+          text: alt.transcript,
+          speaker: s.speaker,
+          speakerTag,
+          isFinal: result.isFinal || false,
+          confidence: alt.confidence || 0,
+          timestamp: Date.now(),
+        };
+        s.lastActivity = Date.now();
+        if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(event));
+      } catch (e) {
+        console.error('[STT] Data handler error:', e?.message || e);
       }
-      const event = {
-        type: result.isFinal ? 'final' : 'partial',
-        text: alt.transcript,
-        speaker: s.speaker,
-        speakerTag,
-        isFinal: result.isFinal || false,
-        confidence: alt.confidence || 0,
-        timestamp: Date.now(),
-      };
-      s.lastActivity = Date.now();
-      if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(event));
     })
     .on('end', () => {
       if (session.stream !== newStream) return;
@@ -268,18 +283,22 @@ app.prepare().then(() => {
 
   const wss = new WebSocket.Server({ noServer: true });
 
-  // Heartbeat to keep connections alive
+  // Heartbeat every 5s to avoid proxy/platform idle timeout (1006); Railway can drop after ~10min without traffic
+  const HEARTBEAT_MS = 5000;
   setInterval(() => {
     wss.clients.forEach((ws) => {
       if (ws.readyState === WebSocket.OPEN) {
-        ws.ping();
-        try { ws.send(JSON.stringify({ type: 'heartbeat', timestamp: Date.now() })); } catch (e) { /* ignore */ }
+        try {
+          ws.ping();
+          ws.send(JSON.stringify({ type: 'heartbeat', timestamp: Date.now() }));
+        } catch (e) { /* ignore */ }
       }
     });
-  }, 10000);
+  }, HEARTBEAT_MS);
 
-  // Route WebSocket upgrades to STT handler
+  // Route WebSocket upgrades to STT handler; enable TCP keepalive to reduce 1006 from proxy idle
   server.on('upgrade', (req, socket, head) => {
+    try { socket.setKeepAlive(true, 5000); } catch (e) { /* ignore */ }
     wss.handleUpgrade(req, socket, head, (ws) => {
       handleSTTConnection(ws, req);
     });
