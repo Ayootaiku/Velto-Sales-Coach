@@ -222,6 +222,9 @@ export function useSTTStream(
       const ws = await connectWebSocket(speaker, newSessionId, diarize)
       wsRef.current = ws
       setIsConnected(true)
+      // #region agent log
+      fetch('http://127.0.0.1:7473/ingest/898f3a90-8b17-490a-b181-c605f5b8779a',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'f351e8'},body:JSON.stringify({sessionId:'f351e8',hypothesisId:'B',location:'use-stt-stream-ws.ts:startStream',message:'setIsConnected(true) after connectWebSocket',data:{speaker,sessionId:newSessionId},timestamp:Date.now()})}).catch(()=>{});
+      // #endregion
       setError(null)
       lastServerMessageTimeRef.current = Date.now()
 
@@ -317,7 +320,9 @@ export function useSTTStream(
         const reason = e?.reason ?? '?'
         console.log(`[TRACE-E] ${speaker} - WebSocket CLOSED code=${code} reason=${reason} (finals received: ${transcriptCountRef.current})`)
         setIsConnected(false)
-
+        // #region agent log
+        fetch('http://127.0.0.1:7473/ingest/898f3a90-8b17-490a-b181-c605f5b8779a',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'f351e8'},body:JSON.stringify({sessionId:'f351e8',hypothesisId:'A',location:'use-stt-stream-ws.ts:closeHandler',message:'setIsConnected(false) on WS close',data:{speaker,code,reason:String(reason)},timestamp:Date.now()})}).catch(()=>{});
+        // #endregion
         // No auto-reconnect on close — first session works without it; retries may cause second-session issues
       }
 
@@ -334,13 +339,9 @@ export function useSTTStream(
 
       // Set up Web Audio API for PCM capture
       // Always create a new AudioContext so every session is fresh (avoids "works once" after refresh).
+      // Web Audio API cleanup happens entirely in stopStream now to avoid race conditions.
       const existingCtx = audioContextRef.current
       if (existingCtx) {
-        try {
-          if (existingCtx.state !== 'closed') await existingCtx.close()
-        } catch (e) {
-          console.warn('[WS STT] Error closing existing AudioContext:', e)
-        }
         audioContextRef.current = null
       }
       const audioContext = new (window.AudioContext || (window as any).webkitAudioContext)()
@@ -510,6 +511,9 @@ export function useSTTStream(
     isStoppingRef.current = true
 
     const sessionId = sessionIdRef.current
+    // #region agent log
+    fetch('http://127.0.0.1:7473/ingest/898f3a90-8b17-490a-b181-c605f5b8779a',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'f351e8'},body:JSON.stringify({sessionId:'f351e8',hypothesisId:'C',location:'use-stt-stream-ws.ts:stopStream',message:'stopStream entered (does NOT call setIsConnected(false) here)',data:{speaker:speakerRef.current,sessionId},timestamp:Date.now()})}).catch(()=>{});
+    // #endregion
     console.log(`[TRACE-STOP] ${speakerRef.current} - stopStream(keepTracks=${keepTracks}) for ${sessionId}`)
 
     // Temporary: capture refs to log before/after cleanup (remove after confirming root cause)
@@ -526,7 +530,10 @@ export function useSTTStream(
       setIsStreaming(false)
       isStreamingRef.current = false
       reconnectAttemptsRef.current = 0
-
+      setIsConnected(false) // End Call: clear indicator so UI shows grey until next session connects
+      // #region agent log
+      fetch('http://127.0.0.1:7473/ingest/898f3a90-8b17-490a-b181-c605f5b8779a',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'f351e8'},body:JSON.stringify({sessionId:'f351e8',hypothesisId:'post-fix',location:'use-stt-stream-ws.ts:stopStream',message:'setIsConnected(false) in stopStream on End Call',data:{speaker:speakerRef.current},timestamp:Date.now()})}).catch(()=>{});
+      // #endregion
       // Reset refs so next start does not immediately trigger watchdog or stale UI
       lastAudioProcessTimeRef.current = Date.now()
       lastActiveTimeRef.current = Date.now()
@@ -539,6 +546,7 @@ export function useSTTStream(
 
       if (scriptProcessorRef.current && sessionIdRef.current === sessionId) {
         try {
+          scriptProcessorRef.current.onaudioprocess = null
           scriptProcessorRef.current.disconnect()
         } catch (e) {
           console.warn('Error disconnecting scriptProcessor:', e)
