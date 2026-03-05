@@ -379,6 +379,7 @@ export function SalesCoachOverlay() {
   const isCoachingInProgressRef = useRef(false)
   const partialDraftShownRef = useRef(false)
   const didAutoStartInRoomRef = useRef(false)
+  const hasHadPreviousSessionRef = useRef(false)
 
   // DEDUPLICATION: Track last processed transcript to prevent duplicate callbacks
   const lastProcessedTranscriptRef = useRef<string>('')
@@ -921,21 +922,22 @@ export function SalesCoachOverlay() {
 
   // Note: Draft coaching disabled - only AI-generated cards will show
 
-  const setupProspectStream = async () => {
+  const setupProspectStream = async (capturedStream?: MediaStream | null) => {
     try {
-      addLog("Requesting system audio...")
-
-      // Try getDisplayMedia first (for system/tab audio)
       let stream: MediaStream | null = null
-      try {
-        stream = await (navigator as any).mediaDevices.getDisplayMedia({
-          audio: true,
-          video: true
-        })
-      } catch (displayErr) {
-        addLog("Display media denied, trying alternative...")
-        // Fallback: try to get audio from another source
-        return null
+      if (capturedStream) {
+        stream = capturedStream
+      } else {
+        addLog("Requesting system audio...")
+        try {
+          stream = await (navigator as any).mediaDevices.getDisplayMedia({
+            audio: true,
+            video: true
+          })
+        } catch (displayErr) {
+          addLog("Display media denied, trying alternative...")
+          return null
+        }
       }
 
       if (!stream) {
@@ -1095,9 +1097,35 @@ export function SalesCoachOverlay() {
       return
     }
 
-    // Dual mode
+    // Dual mode: getDisplayMedia FIRST (user gesture) then setState
     setIsDiarized(false)
     addLog("Starting session (DUAL mode)...")
+
+    if (hasHadPreviousSessionRef.current) {
+      await new Promise((r) => setTimeout(r, 400))
+    }
+
+    let capturedStream: MediaStream | null = null
+    try {
+      capturedStream = await (navigator as any).mediaDevices.getDisplayMedia({
+        audio: true,
+        video: true
+      })
+    } catch (displayErr) {
+      addLog("Display media denied or cancelled.")
+      return
+    }
+    if (!capturedStream) {
+      addLog("❌ Failed to get display media stream")
+      return
+    }
+    const audioTrack = capturedStream.getAudioTracks()[0]
+    if (!audioTrack || audioTrack.readyState !== 'live' || !capturedStream.active) {
+      addLog("❌ Tab share invalid or ended. Check 'Share tab audio' and try again.")
+      capturedStream.getTracks().forEach((t: MediaStreamTrack) => t.stop())
+      return
+    }
+
     resetTrace()
     setStatus("listening")
     setCallTime(0)
@@ -1105,7 +1133,7 @@ export function SalesCoachOverlay() {
     transcriptTurnsRef.current = []
 
     addLog("Initializing dual-stream prospect audio...")
-    const prospectResult = await setupProspectStream()
+    const prospectResult = await setupProspectStream(capturedStream)
     if (!prospectResult) {
       addLog("❌ CRITICAL: Prospect stream failed - no prospect audio captured!")
       setCards([{
@@ -1156,6 +1184,16 @@ export function SalesCoachOverlay() {
     speechRecognition.stopListening()
     await salespersonStream.stopStream()
     await prospectStream.stopStream()
+
+    // Chrome audio reset: clear routing so next getDisplayMedia works (second-session fix)
+    try {
+      const releaseStream = await navigator.mediaDevices.getUserMedia({ audio: true })
+      releaseStream.getTracks().forEach((t: MediaStreamTrack) => t.stop())
+      await new Promise((r) => setTimeout(r, 2000))
+    } catch (_) {
+      /* ignore */
+    }
+    hasHadPreviousSessionRef.current = true
 
     setStatus("ready")
     setCallTime(0)
