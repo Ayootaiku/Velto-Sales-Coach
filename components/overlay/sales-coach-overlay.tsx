@@ -1151,7 +1151,12 @@ export function SalesCoachOverlay() {
     setManualSpeaker('salesperson')
   }, [microphone, speechRecognition, salespersonStream, prospectStream, addLog])
 
-  const handleReset = useCallback(() => {
+  const handleReset = useCallback(async () => {
+    microphone.stopListening()
+    speechRecognition.stopListening()
+    await salespersonStream.stopStream()
+    await prospectStream.stopStream()
+
     setStatus("ready")
     setCallTime(0)
     setCards([])
@@ -1161,10 +1166,6 @@ export function SalesCoachOverlay() {
     turnManagerRef.current.reset()
     setSalespersonTag(null)
     setManualSpeaker('salesperson')
-    microphone.stopListening()
-    speechRecognition.stopListening()
-    salespersonStream.stopStream()
-    prospectStream.stopStream()
     if (fallbackTimerRef.current) {
       clearTimeout(fallbackTimerRef.current)
       fallbackTimerRef.current = null

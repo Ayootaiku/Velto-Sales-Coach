@@ -539,64 +539,83 @@ export function useSTTStream(
     const sessionId = sessionIdRef.current
     console.log(`[TRACE-STOP] ${speakerRef.current} - stopStream(keepTracks=${keepTracks}) for ${sessionId}`)
 
-    setIsStreaming(false)
-    isStreamingRef.current = false
-    reconnectAttemptsRef.current = 0
+    try {
+      setIsStreaming(false)
+      isStreamingRef.current = false
+      reconnectAttemptsRef.current = 0
 
-    // Reset refs so next start does not immediately trigger watchdog or stale UI
-    lastAudioProcessTimeRef.current = Date.now()
-    lastActiveTimeRef.current = Date.now()
+      // Reset refs so next start does not immediately trigger watchdog or stale UI
+      lastAudioProcessTimeRef.current = Date.now()
+      lastActiveTimeRef.current = Date.now()
 
-    if (wsRef.current) {
-      wsRef.current.onclose = null // Prevent triggering auto-reconnect
-      wsRef.current.close()
-      wsRef.current = null
-    }
-
-    if (scriptProcessorRef.current) {
-      scriptProcessorRef.current.disconnect()
-      scriptProcessorRef.current = null
-    }
-
-    if (sourceRef.current) {
-      sourceRef.current.disconnect()
-      sourceRef.current = null
-    }
-
-    // Only close AudioContext if we are NOT doing a rollover (keepTracks = false)
-    // OR if we are forcing a full hardware reset (forceKillContext = true)
-    // This is crucial for fixing the "In-Room Death" bug
-    if (audioContextRef.current && (!keepTracks || ((window as any).forceKillContext))) {
-      try {
-        if (audioContextRef.current.state !== 'closed') {
-          await audioContextRef.current.close()
-        }
-      } catch (e) {
-        console.warn('Error closing AudioContext:', e)
+      if (wsRef.current && sessionIdRef.current === sessionId) {
+        wsRef.current.onclose = null // Prevent triggering auto-reconnect
+        wsRef.current.close()
+        wsRef.current = null
       }
-      audioContextRef.current = null
-    }
 
-    if (watchdogIntervalRef.current) {
-      clearInterval(watchdogIntervalRef.current)
-      watchdogIntervalRef.current = null
-    }
-    if (healthCheckIntervalRef.current) {
-      clearInterval(healthCheckIntervalRef.current)
-      healthCheckIntervalRef.current = null
-    }
-    if (watchdogAliveIntervalRef.current) {
-      clearInterval(watchdogAliveIntervalRef.current)
-      watchdogAliveIntervalRef.current = null
-    }
+      if (scriptProcessorRef.current && sessionIdRef.current === sessionId) {
+        try {
+          scriptProcessorRef.current.disconnect()
+        } catch (e) {
+          console.warn('Error disconnecting scriptProcessor:', e)
+        }
+        scriptProcessorRef.current = null
+      }
 
-    if (streamRef.current && !keepTracks) {
-      streamRef.current.getTracks().forEach(track => track.stop())
-      streamRef.current = null
-    }
+      if (sourceRef.current && sessionIdRef.current === sessionId) {
+        try {
+          sourceRef.current.disconnect()
+        } catch (e) {
+          console.warn('Error disconnecting source:', e)
+        }
+        sourceRef.current = null
+      }
 
-    console.log(`[TRACE-STOP] ${speakerRef.current} - Stream stopped for ${sessionId}`)
-    isStoppingRef.current = false
+      // Only close AudioContext if we are NOT doing a rollover (keepTracks = false)
+      // OR if we are forcing a full hardware reset (forceKillContext = true)
+      // This is crucial for fixing the "In-Room Death" bug
+      if (audioContextRef.current && (!keepTracks || ((window as any).forceKillContext))) {
+        try {
+          if (audioContextRef.current.state !== 'closed') {
+            await audioContextRef.current.close()
+          }
+        } catch (e) {
+          console.warn('Error closing AudioContext:', e)
+        }
+        if (sessionIdRef.current === sessionId) {
+          audioContextRef.current = null
+        }
+      }
+
+      if (sessionIdRef.current === sessionId) {
+        if (watchdogIntervalRef.current) {
+          clearInterval(watchdogIntervalRef.current)
+          watchdogIntervalRef.current = null
+        }
+        if (healthCheckIntervalRef.current) {
+          clearInterval(healthCheckIntervalRef.current)
+          healthCheckIntervalRef.current = null
+        }
+        if (watchdogAliveIntervalRef.current) {
+          clearInterval(watchdogAliveIntervalRef.current)
+          watchdogAliveIntervalRef.current = null
+        }
+      }
+
+      if (streamRef.current && !keepTracks && sessionIdRef.current === sessionId) {
+        try {
+          streamRef.current.getTracks().forEach(track => track.stop())
+        } catch (e) {
+          console.warn('Error stopping stream tracks:', e)
+        }
+        streamRef.current = null
+      }
+
+      console.log(`[TRACE-STOP] ${speakerRef.current} - Stream stopped for ${sessionId}`)
+    } finally {
+      isStoppingRef.current = false
+    }
   }, [])
 
   const startAutomatic = useCallback(async () => {
