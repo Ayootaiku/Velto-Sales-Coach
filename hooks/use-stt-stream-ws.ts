@@ -318,40 +318,7 @@ export function useSTTStream(
         console.log(`[TRACE-E] ${speaker} - WebSocket CLOSED code=${code} reason=${reason} (finals received: ${transcriptCountRef.current})`)
         setIsConnected(false)
 
-        // Auto-reconnect with fresh session ID and re-attach handlers so reconnects can repeat
-        if (isStreamingRef.current && reconnectAttemptsRef.current < MAX_RECONNECT_ATTEMPTS) {
-          reconnectAttemptsRef.current++
-          const delay = Math.min(1000 * reconnectAttemptsRef.current, MAX_RECONNECT_DELAY_MS)
-          console.log(`[WATCHDOG] ${speaker} - 🔄 Reconnecting in ${delay}ms (attempt ${reconnectAttemptsRef.current})...`)
-
-          setTimeout(async () => {
-            try {
-              if (!streamRef.current) return
-              const newSessionIdForReconnect = `${speaker}-${Date.now()}-${Math.random().toString(36).substring(2, 8)}`
-              sessionIdRef.current = newSessionIdForReconnect
-              const newWs = await connectWebSocket(speaker, newSessionIdForReconnect, isDiarizedRef.current)
-              wsRef.current = newWs
-              setIsConnected(true)
-              newWs.onmessage = messageHandler
-              newWs.onclose = closeHandler
-              newWs.onerror = () => {
-                try { newWs.close() } catch (_) { /* no-op */ }
-              }
-              console.log(`[WATCHDOG] ${speaker} - ✅ Reconnect succeeded (session: ${newSessionIdForReconnect})`)
-            } catch (err) {
-              console.error(`[WS STT ${speaker}] ❌ Reconnect failed:`, err)
-              if (reconnectAttemptsRef.current >= MAX_RECONNECT_ATTEMPTS) {
-                isStreamingRef.current = false
-                setIsStreaming(false)
-                setError('WebSocket connection lost. Please restart session.')
-              }
-            }
-          }, delay)
-        } else {
-          if (!isStreamingRef.current) {
-            console.log(`[WATCHDOG] ${speaker} - Not reconnecting (stream intentionally stopped)`)
-          }
-        }
+        // No auto-reconnect on close — first session works without it; retries may cause second-session issues
       }
 
       ws.onmessage = messageHandler
@@ -520,7 +487,7 @@ export function useSTTStream(
       }, CONNECTION_HEALTH_CHECK_MS)
 
       console.log(`[WS STT ${speaker}] ✅ Audio processing started (stream active: ${audioStreamToUse.active})`)
-      console.warn(`[WATCHDOG] *** ENABLED *** ${speaker}: Reconnect on close | No-audio 15s | Connection-health 20s | Overlay recovery 7s (no silence restart)`)
+      console.warn(`[WATCHDOG] *** ENABLED *** ${speaker}: No-audio 15s | Connection-health 20s | Overlay recovery 7s (no reconnect on close, no silence restart)`)
       console.log(`[WATCHDOG] ${speaker} - Watchdogs active: no-audio 15s, connection-health 20s`)
 
       // Periodic "watchdog alive" log so user can confirm new code is running (every 30s)
