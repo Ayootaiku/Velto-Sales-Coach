@@ -217,6 +217,7 @@ export function useSTTStream(
       }
       streamRef.current = audioStreamToUse
 
+      console.log('[WS STT] startStream for', speaker, 'sessionId', newSessionId, 'streamActive', audioStreamToUse?.active)
       // Connect to WebSocket
       const ws = await connectWebSocket(speaker, newSessionId, diarize)
       wsRef.current = ws
@@ -355,7 +356,8 @@ export function useSTTStream(
 
       ws.onmessage = messageHandler
       ws.onclose = closeHandler
-      ws.onerror = () => {
+      ws.onerror = (evt) => {
+        console.error('[WS STT] onerror', speaker, sessionIdRef.current, evt)
         try { ws.close() } catch (_) { /* no-op */ }
       }
 

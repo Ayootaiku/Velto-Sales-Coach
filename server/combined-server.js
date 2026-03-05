@@ -73,6 +73,7 @@ function createNewStreamForSession(session, ws) {
   const newStream = client
     .streamingRecognize({ config, interimResults: true, singleUtterance: false })
     .on('error', (error) => {
+      console.error('[GCP STT] stream error', error);
       console.error(`[STT Error ${sessionId}]`, error.message, error);
       if (ws.readyState === WebSocket.OPEN) {
         ws.send(JSON.stringify({ type: 'error', message: error.message }));
@@ -259,8 +260,15 @@ function handleSTTConnection(ws, req) {
     } catch (err) { /* ignore write errors */ }
   });
 
-  ws.on('close', () => closeSession(ws, 'client_close'));
-  ws.on('error', () => closeSession(ws, 'client_error'));
+  ws.on('close', (code, reason) => {
+    const session = sessions.get(ws);
+    console.log('[WS] close', { code, reason: reason?.toString?.(), sessionId: session?.sessionId });
+    closeSession(ws, 'client_close_' + code);
+  });
+  ws.on('error', (err) => {
+    console.error('[WS] error', err);
+    closeSession(ws, 'client_error');
+  });
 }
 
 app.prepare().then(() => {

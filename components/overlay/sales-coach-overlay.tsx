@@ -1101,6 +1101,7 @@ export function SalesCoachOverlay() {
     setIsDiarized(false)
     addLog("Starting session (DUAL mode)...")
 
+    console.log('[SECOND-SESSION] About to call getDisplayMedia, hasHadPreviousSession:', hasHadPreviousSessionRef.current)
     if (hasHadPreviousSessionRef.current) {
       await new Promise((r) => setTimeout(r, 400))
     }
@@ -1112,6 +1113,7 @@ export function SalesCoachOverlay() {
         video: true
       })
     } catch (displayErr) {
+      console.error('[SECOND-SESSION] getDisplayMedia failed:', displayErr)
       addLog("Display media denied or cancelled.")
       return
     }
@@ -1119,8 +1121,10 @@ export function SalesCoachOverlay() {
       addLog("❌ Failed to get display media stream")
       return
     }
+    console.log('[SECOND-SESSION] getDisplayMedia resolved, stream.active:', !!capturedStream?.active, 'audioTracks:', capturedStream?.getAudioTracks?.()?.length, 'firstTrackState:', capturedStream?.getAudioTracks?.()?.[0]?.readyState)
     const audioTrack = capturedStream.getAudioTracks()[0]
     if (!audioTrack || audioTrack.readyState !== 'live' || !capturedStream.active) {
+      console.warn('[SECOND-SESSION] Stream validation failed:', { hasTrack: !!audioTrack, readyState: audioTrack?.readyState, streamActive: capturedStream?.active })
       addLog("❌ Tab share invalid or ended. Check 'Share tab audio' and try again.")
       capturedStream.getTracks().forEach((t: MediaStreamTrack) => t.stop())
       return
