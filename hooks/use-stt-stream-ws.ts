@@ -539,6 +539,16 @@ export function useSTTStream(
     const sessionId = sessionIdRef.current
     console.log(`[TRACE-STOP] ${speakerRef.current} - stopStream(keepTracks=${keepTracks}) for ${sessionId}`)
 
+    // Temporary: capture refs to log before/after cleanup (remove after confirming root cause)
+    const wsCapture = wsRef.current
+    const ctxCapture = audioContextRef.current
+    console.log('🔴 ENDING CALL - State before cleanup:', {
+      wsState: wsCapture?.readyState,
+      audioState: ctxCapture?.state,
+      sessionActive: isStreamingRef.current,
+      speaker: speakerRef.current
+    })
+
     try {
       setIsStreaming(false)
       isStreamingRef.current = false
@@ -613,6 +623,15 @@ export function useSTTStream(
       }
 
       console.log(`[TRACE-STOP] ${speakerRef.current} - Stream stopped for ${sessionId}`)
+
+      // Temporary: log state 1s after cleanup (remove after confirming root cause)
+      setTimeout(() => {
+        console.log('🟢 AFTER CLEANUP (1s):', {
+          wsState: wsCapture?.readyState,
+          audioState: ctxCapture?.state,
+          expected: { wsClosed: 3, audioClosed: 'closed' }
+        })
+      }, 1000)
     } finally {
       isStoppingRef.current = false
     }
