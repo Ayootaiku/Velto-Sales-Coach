@@ -65,8 +65,14 @@ export async function generateLiveCoaching(
   const isProspect = lastSpeaker === 'prospect';
   const shouldStream = !!onUpdate;
 
+  const fetchTimeoutMs = 14000;
+  const streamReadTimeoutMs = 9000;
+
   try {
     console.log('[Client] Sending to /api/coach/live:', { speaker: lastSpeaker, turns: recentTranscript.length, stream: shouldStream });
+
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), fetchTimeoutMs);
 
     const response = await fetch(apiUrl('/api/coach/live'), {
       method: 'POST',
@@ -79,7 +85,10 @@ export async function generateLiveCoaching(
         stream: shouldStream,
         settings
       }),
+      signal: controller.signal,
     });
+
+    clearTimeout(timeoutId);
 
     if (!response.ok) {
       const errorData = await response.json().catch(() => ({ error: 'Unknown error' }));
