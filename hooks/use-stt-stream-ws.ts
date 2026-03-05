@@ -361,6 +361,10 @@ export function useSTTStream(
         try { ws.close() } catch (_) { /* no-op */ }
       }
 
+      // Mark streaming true as soon as we have a live connection so 1006 during setup triggers reconnect (second-session fix)
+      setIsStreaming(true)
+      isStreamingRef.current = true
+
       // Set up Web Audio API for PCM capture
       // Always create a new AudioContext so every session is fresh (avoids "works once" after refresh).
       const existingCtx = audioContextRef.current
