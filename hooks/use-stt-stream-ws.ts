@@ -227,9 +227,6 @@ export function useSTTStream(
       wsRef.current = ws
       setIsConnected(true)
       if (speaker === 'prospect') console.log('[prospect] stream connected = true')
-      // #region agent log
-      fetch('http://127.0.0.1:7473/ingest/898f3a90-8b17-490a-b181-c605f5b8779a', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': 'f351e8' }, body: JSON.stringify({ sessionId: 'f351e8', hypothesisId: 'B', location: 'use-stt-stream-ws.ts:startStream', message: 'setIsConnected(true) after connectWebSocket', data: { speaker, sessionId: newSessionId }, timestamp: Date.now() }) }).catch(() => { });
-      // #endregion
       setError(null)
       lastServerMessageTimeRef.current = Date.now()
 
@@ -333,9 +330,6 @@ export function useSTTStream(
         const sid = sessionIdRef.current
         console.log(`[TRACE-E] ${speaker} - WebSocket CLOSED code=${code} reason=${reason} sessionId=${sid} (finals received: ${transcriptCountRef.current})`)
         setIsConnected(false)
-        // #region agent log
-        fetch('http://127.0.0.1:7473/ingest/898f3a90-8b17-490a-b181-c605f5b8779a', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': 'f351e8' }, body: JSON.stringify({ sessionId: 'f351e8', hypothesisId: 'A', location: 'use-stt-stream-ws.ts:closeHandler', message: 'setIsConnected(false) on WS close', data: { speaker, code, reason: String(reason) }, timestamp: Date.now() }) }).catch(() => { });
-        // #endregion
         // No auto-reconnect on close — first session works without it; retries may cause second-session issues
       }
 
@@ -531,9 +525,6 @@ export function useSTTStream(
     isStoppingRef.current = true
 
     const sessionId = sessionIdRef.current
-    // #region agent log
-    fetch('http://127.0.0.1:7473/ingest/898f3a90-8b17-490a-b181-c605f5b8779a', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': 'f351e8' }, body: JSON.stringify({ sessionId: 'f351e8', hypothesisId: 'C', location: 'use-stt-stream-ws.ts:stopStream', message: 'stopStream entered (does NOT call setIsConnected(false) here)', data: { speaker: speakerRef.current, sessionId }, timestamp: Date.now() }) }).catch(() => { });
-    // #endregion
     console.log(`[TRACE-STOP] ${speakerRef.current} - stopStream(keepTracks=${keepTracks}) for ${sessionId}`)
 
     // Temporary: capture refs to log before/after cleanup (remove after confirming root cause)
@@ -551,9 +542,6 @@ export function useSTTStream(
       isStreamingRef.current = false
       reconnectAttemptsRef.current = 0
       setIsConnected(false) // End Call: clear indicator so UI shows grey until next session connects
-      // #region agent log
-      fetch('http://127.0.0.1:7473/ingest/898f3a90-8b17-490a-b181-c605f5b8779a', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': 'f351e8' }, body: JSON.stringify({ sessionId: 'f351e8', hypothesisId: 'post-fix', location: 'use-stt-stream-ws.ts:stopStream', message: 'setIsConnected(false) in stopStream on End Call', data: { speaker: speakerRef.current }, timestamp: Date.now() }) }).catch(() => { });
-      // #endregion
       // Reset refs so next start does not immediately trigger watchdog or stale UI
       lastAudioProcessTimeRef.current = Date.now()
       lastActiveTimeRef.current = Date.now()

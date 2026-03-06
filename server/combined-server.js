@@ -73,7 +73,7 @@ function createNewStreamForSession(session, ws) {
   const sessionId = session.sessionId;
   const oldStream = session.stream;
   if (oldStream) {
-    try { oldStream.removeAllListeners(); oldStream.end(); } catch (e) { /* ignore */ }
+    try { oldStream.end(); } catch (e) { /* ignore */ }
   }
   const newStream = client
     .streamingRecognize({ config, interimResults: true, singleUtterance: false })
