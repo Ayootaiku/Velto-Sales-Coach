@@ -607,27 +607,18 @@ export function useSTTStream(
           streamRef.current.getTracks().forEach(track => track.stop())
         } catch (e) {
           console.warn('Error stopping stream tracks:', e)
+          streamRef.current = null
         }
-        streamRef.current = null
+
+        console.log(`[TRACE-STOP] ${speakerRef.current} - Stream stopped for ${sessionId}`)
       }
-
-      console.log(`[TRACE-STOP] ${speakerRef.current} - Stream stopped for ${sessionId}`)
-
-      // Temporary: log state 1s after cleanup (remove after confirming root cause)
-      setTimeout(() => {
-        console.log('🟢 AFTER CLEANUP (1s):', {
-          wsState: wsCapture?.readyState,
-          audioState: ctxCapture?.state,
-          expected: { wsClosed: 3, audioClosed: 'closed' }
-        })
-      }, 1000)
     } finally {
       isStoppingRef.current = false
     }
   }, [])
 
-  const startAutomatic = useCallback(async () => {
-    const speaker = speakerRef.current
+  const startAutomatic = useCallback(async (speakerOverride?: 'salesperson' | 'prospect') => {
+    const speaker = speakerOverride || speakerRef.current
     const oldSessionId = sessionIdRef.current
     const existingStream = streamRef.current
 

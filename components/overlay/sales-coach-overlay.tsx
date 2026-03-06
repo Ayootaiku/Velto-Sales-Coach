@@ -1048,13 +1048,13 @@ export function SalesCoachOverlay() {
     return () => clearInterval(interval)
   }, [status, isDiarized, manualSpeaker, addLog])
 
-  // SPEAKER SWITCH WATCHDOG: Automatically reset hardware when switching back to Prospect
-  // This ensures the mic is fresh when the user stops talking and hands over to the prospect
+  // SPEAKER SWITCH WATCHDOG: Automatically reset hardware when switching Speakers
+  // This ensures the WebSocket connects with the NEW speaker tag immediately
   useEffect(() => {
-    if (status === "listening" && isDiarized && manualSpeaker === 'prospect') {
-      addLog("⚡ SYSTEM: HARDWARE RESET (Speaker Switch to Prospect)...")
-      console.warn("[IN-ROOM WATCHDOG] 🔄 Refreshing audio pulse to prevent timeout...")
-      salespersonStream.startAutomatic()
+    if (status === "listening" && isDiarized) {
+      addLog(`⚡ SYSTEM: SPEAKER SWITCH -> ${manualSpeaker.toUpperCase()}`)
+      console.warn(`[IN-ROOM] 🔄 Switching speaker to ${manualSpeaker}...`)
+      salespersonStream.startAutomatic(manualSpeaker)
     }
   }, [manualSpeaker, isDiarized, status, salespersonStream.startAutomatic, addLog])
 
@@ -1231,7 +1231,8 @@ export function SalesCoachOverlay() {
     try {
       const releaseStream = await navigator.mediaDevices.getUserMedia({ audio: true })
       releaseStream.getTracks().forEach((t: MediaStreamTrack) => t.stop())
-      await new Promise((r) => setTimeout(r, 2000))
+      // Reduced delay: 500ms is usually enough for the OS/Chrome to release the hardware lock
+      await new Promise((r) => setTimeout(r, 500))
     } catch (_) {
       /* ignore */
     }
@@ -1260,26 +1261,10 @@ export function SalesCoachOverlay() {
   }, [microphone, speechRecognition, salespersonStream, prospectStream])
 
   const handleStartNewSession = useCallback(async () => {
-    // Prefer build-time secret (VITE_RESTART_SECRET) so users never set it; fallback to settings for backwards compat
-    const secret = (
-      (typeof import.meta !== 'undefined' && (import.meta as { env?: { VITE_RESTART_SECRET?: string } }).env?.VITE_RESTART_SECRET) ||
-      settings.restartSecret ||
-      ''
-    ).trim()
-    if (secret) {
-      try {
-        await fetch(getApiUrl('/api/restart'), {
-          method: 'POST',
-          headers: { 'X-Restart-Secret': secret },
-        })
-      } catch (_) {
-        /* ignore */
-      }
-      setRestartTriggered(true)
-      setRestartComplete(false)
-    }
+    // Note: We removed the automatic /api/restart call here to make the website 
+    // feel as snappy as the extension. New sessions now start instantly.
     await handleReset()
-  }, [settings.restartSecret, handleReset])
+  }, [handleReset])
 
   // Background poll for "restart complete" when on home and restart was triggered
   useEffect(() => {
