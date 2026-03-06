@@ -123,7 +123,10 @@ async function startServer() {
     const session = sessions.get(ws);
     if (session) {
       try {
-        session.stream?.end();
+        if (session.stream) {
+          session.stream.removeAllListeners();
+          session.stream.end();
+        }
         console.log(`[WS Server] Session closed: ${session.sessionId}`);
       } catch (e) {
         // Ignore
@@ -137,6 +140,19 @@ async function startServer() {
 
   // Create WebSocket server
   const wss = new WebSocket.Server({ port: PORT });
+
+  // Heartbeat every 5s to avoid proxy/platform idle timeout (1006); Railway can drop after ~10min without traffic
+  const HEARTBEAT_MS = 5000;
+  setInterval(() => {
+    wss.clients.forEach((ws) => {
+      if (ws.readyState === WebSocket.OPEN) {
+        try {
+          ws.ping();
+          ws.send(JSON.stringify({ type: 'heartbeat', timestamp: Date.now() }));
+        } catch (e) { /* ignore */ }
+      }
+    });
+  }, HEARTBEAT_MS);
 
   // We don't use server-side pings since the client handles all audio-flow check watchdog logic
   console.log(`[WS Server] WebSocket server started on port ${PORT}`);
@@ -300,6 +316,7 @@ async function startServer() {
         if (Buffer.isBuffer(data)) {
           buffer = data;
         } else if (typeof data === 'string') {
+          if (data.includes('"type":"pong"')) return; // Ignore manual pongs
           // Handle base64 encoded PCM
           buffer = Buffer.from(data, 'base64');
         }

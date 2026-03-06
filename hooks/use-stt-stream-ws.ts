@@ -247,6 +247,11 @@ export function useSTTStream(
           }
 
           if (data.type === 'heartbeat') {
+            // Respond to keep Railway's proxy connection alive natively even if Chrome throttles JS
+            const currentWs = wsRef.current;
+            if (currentWs && currentWs.readyState === WebSocket.OPEN) {
+              currentWs.send(JSON.stringify({ type: 'pong' }));
+            }
             return
           }
 

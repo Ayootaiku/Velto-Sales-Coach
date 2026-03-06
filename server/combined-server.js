@@ -51,7 +51,12 @@ function getSpeechClient() {
 function closeSession(ws, reason) {
   const session = sessions.get(ws);
   if (session) {
-    try { session.stream?.end(); } catch (e) { /* ignore */ }
+    try {
+      if (session.stream) {
+        session.stream.removeAllListeners();
+        session.stream.end();
+      }
+    } catch (e) { /* ignore */ }
     console.log(`[STT] Session closed: ${session.sessionId} reason=${reason || 'unknown'}`);
     sessions.delete(ws);
   }
@@ -78,31 +83,7 @@ function createNewStreamForSession(session, ws) {
       if (ws.readyState === WebSocket.OPEN) {
         ws.send(JSON.stringify({ type: 'error', message: error.message }));
       }
-      if (session.streamErrorRecycled) {
-        closeSession(ws, 'stream_error');
-        return;
-      }
-      session.streamErrorRecycled = true;
-      session.stream = null;
-      setImmediate(() => {
-        if (ws.readyState !== WebSocket.OPEN || !sessions.has(ws)) return;
-        try {
-          createNewStreamForSession(session, ws);
-          console.log(`[STT] Stream error, recycled new stream for session ${sessionId}`);
-        } catch (e) {
-          console.error('[STT] Stream recycle after error failed:', e);
-          setTimeout(() => {
-            if (ws.readyState !== WebSocket.OPEN || !sessions.has(ws)) return;
-            try {
-              createNewStreamForSession(session, ws);
-              console.log(`[STT] Stream error recycle retry succeeded for session ${sessionId}`);
-            } catch (e2) {
-              console.error('[STT] Stream error recycle retry failed:', e2);
-              closeSession(ws, 'stream_error');
-            }
-          }, 200);
-        }
-      });
+      closeSession(ws, 'stream_error');
     })
     .on('data', (data) => {
       try {
@@ -134,58 +115,12 @@ function createNewStreamForSession(session, ws) {
     .on('end', () => {
       if (session.stream !== newStream) return;
       session.stream = null;
-      if (ws.readyState !== WebSocket.OPEN || !sessions.has(ws)) return;
-      setImmediate(() => {
-        if (ws.readyState !== WebSocket.OPEN || !sessions.has(ws)) return;
-        try {
-          createNewStreamForSession(session, ws);
-          console.log(`[STT] Stream ended, recycling new stream for session ${sessionId}`);
-        } catch (err) {
-          console.error('[STT] Stream recycle failed:', err);
-          try {
-            setTimeout(() => {
-              if (ws.readyState !== WebSocket.OPEN || !sessions.has(ws)) return;
-              try {
-                createNewStreamForSession(session, ws);
-                console.log(`[STT] Stream recycle retry succeeded for session ${sessionId}`);
-              } catch (e2) {
-                console.error('[STT] Stream recycle retry failed:', e2);
-                closeSession(ws, 'stream_error');
-              }
-            }, 200);
-          } catch (_) {
-            closeSession(ws, 'stream_error');
-          }
-        }
-      });
+      closeSession(ws, 'stream_ended');
     })
     .on('close', () => {
       if (session.stream !== newStream) return;
       session.stream = null;
-      if (ws.readyState !== WebSocket.OPEN || !sessions.has(ws)) return;
-      setImmediate(() => {
-        if (ws.readyState !== WebSocket.OPEN || !sessions.has(ws)) return;
-        try {
-          createNewStreamForSession(session, ws);
-          console.log(`[STT] Stream closed, recycling new stream for session ${sessionId}`);
-        } catch (err) {
-          console.error('[STT] Stream recycle failed:', err);
-          try {
-            setTimeout(() => {
-              if (ws.readyState !== WebSocket.OPEN || !sessions.has(ws)) return;
-              try {
-                createNewStreamForSession(session, ws);
-                console.log(`[STT] Stream recycle retry succeeded for session ${sessionId}`);
-              } catch (e2) {
-                console.error('[STT] Stream recycle retry failed:', e2);
-                closeSession(ws, 'stream_error');
-              }
-            }, 200);
-          } catch (_) {
-            closeSession(ws, 'stream_error');
-          }
-        }
-      });
+      closeSession(ws, 'stream_closed');
     });
   session.stream = newStream;
   session.streamErrorRecycled = false;
@@ -251,6 +186,7 @@ function handleSTTConnection(ws, req) {
     const session = sessions.get(ws);
     if (!session || !session.stream) return;
     try {
+      if (typeof data === 'string' && data.includes('"type":"pong"')) return; // Ignore manual pongs
       const buffer = Buffer.isBuffer(data) ? data : (typeof data === 'string' ? Buffer.from(data, 'base64') : null);
       if (buffer) {
         session.stream.write(buffer);
