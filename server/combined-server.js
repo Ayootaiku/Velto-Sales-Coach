@@ -78,14 +78,22 @@ function createNewStreamForSession(session, ws) {
   const newStream = client
     .streamingRecognize({ config, interimResults: true, singleUtterance: false })
     .on('error', (error) => {
-      console.error('[GCP STT] stream error', error);
-      console.error(`[STT Error ${sessionId}]`, error.message, error);
-      if (ws.readyState === WebSocket.OPEN) {
-        ws.send(JSON.stringify({ type: 'error', message: error.message }));
+      console.error(`[STT Error ${sessionId}]`, error.message);
+      // If Railway proxy or Google drops the stream, attempt ONE silent recreation 
+      // before giving up and closing the WebSocket.
+      if (!session.streamErrorRecycled && ws.readyState === WebSocket.OPEN) {
+        console.log(`[STT] ${sessionId}: Attempting silent stream recovery...`);
+        session.streamErrorRecycled = true;
+        createNewStreamForSession(session, ws);
+      } else {
+        if (ws.readyState === WebSocket.OPEN) {
+          ws.send(JSON.stringify({ type: 'error', message: error.message }));
+        }
+        closeSession(ws, 'stream_error_max_retries');
       }
-      closeSession(ws, 'stream_error');
     })
     .on('data', (data) => {
+      // (same as before)
       try {
         const s = sessions.get(ws);
         if (!s || !s.stream || !data.results?.length) return;
@@ -114,13 +122,14 @@ function createNewStreamForSession(session, ws) {
     })
     .on('end', () => {
       if (session.stream !== newStream) return;
-      session.stream = null;
-      closeSession(ws, 'stream_ended');
+      console.log(`[STT] ${sessionId}: Stream ended (5min limit reached?). Recycling...`);
+      createNewStreamForSession(session, ws);
     })
     .on('close', () => {
+      // (same as 'end')
       if (session.stream !== newStream) return;
-      session.stream = null;
-      closeSession(ws, 'stream_closed');
+      console.log(`[STT] ${sessionId}: Stream closed by server. Recycling...`);
+      createNewStreamForSession(session, ws);
     });
   session.stream = newStream;
   session.streamErrorRecycled = false;

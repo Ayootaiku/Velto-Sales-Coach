@@ -193,7 +193,7 @@ export function useSTTStream(
       transcriptCountRef.current = 0
       bytesSentRef.current = 0
 
-      console.log(`[TRACE] ${speaker} - Starting STT stream with session: ${newSessionId}`)
+      console.log(`[TRACE] ${speaker} - Starting STT stream with session: ${newSessionId} (Logic: v1.2.6-FINAL-FIX)`)
 
       // Get audio stream
       let audioStreamToUse: MediaStream
@@ -329,8 +329,26 @@ export function useSTTStream(
         const reason = e?.reason ?? '?'
         const sid = sessionIdRef.current
         console.log(`[TRACE-E] ${speaker} - WebSocket CLOSED code=${code} reason=${reason} sessionId=${sid} (finals received: ${transcriptCountRef.current})`)
+
+        // SILENT RECONNECT on 1006 (Abnormal Closure)
+        // If the session is still "streaming" (user hasn't clicked End), try to recover without a UI flicker
+        if (code === 1006 && isStreamingRef.current && !isStoppingRef.current) {
+          console.warn(`[RECOVERY] 1006 Detected for ${speaker}. Attempting silent reconnect...`)
+          // We keep isConnected = true for a brief bridge period (2s) to prevent UI indicators from dropping
+          const timer = setTimeout(() => {
+            if (wsRef.current?.readyState !== WebSocket.OPEN) {
+              setIsConnected(false)
+            }
+          }, 2000)
+
+          startAutomatic().catch(err => {
+            console.error('[RECOVERY] Silent reconnect failed:', err)
+            setIsConnected(false)
+          })
+          return
+        }
+
         setIsConnected(false)
-        // No auto-reconnect on close — first session works without it; retries may cause second-session issues
       }
 
       ws.onmessage = messageHandler

@@ -119,23 +119,105 @@ async function startServer() {
   // REMOVED: Inactive session cleanup - keep sessions alive indefinitely as requested
   // setInterval(() => { ... }, 10000);
 
-  function closeSession(ws) {
+  function closeSession(ws, reason) {
     const session = sessions.get(ws);
     if (session) {
-      try {
-        if (session.stream) {
-          // Do NOT call removeAllListeners() to prevent unhandled 'error' events crashing the Node.js process
-          session.stream.end();
-        }
-        console.log(`[WS Server] Session closed: ${session.sessionId}`);
-      } catch (e) {
-        // Ignore
-      }
+      closeSessionStreamOnly(session);
+      console.log(`[WS Server] Session closed: ${session.sessionId} reason=${reason || 'unknown'}`);
       sessions.delete(ws);
     }
     if (ws.readyState === WebSocket.OPEN) {
-      ws.close();
+      try { ws.close(1000, reason || 'session_closed'); } catch (e) { /* ignore */ }
     }
+  }
+
+  function closeSessionStreamOnly(session) {
+    if (session && session.stream) {
+      try {
+        // Do NOT call removeAllListeners() to prevent unhandled 'error' events
+        session.stream.end();
+      } catch (e) { /* ignore */ }
+      session.stream = null;
+    }
+  }
+
+  function createNewStreamForSession(session, ws) {
+    const client = session.client;
+    const config = session.config;
+    const sessionId = session.sessionId;
+
+    // DIAGNOSTIC counters
+    let dataEventCount = 0;
+    let finalCount = 0;
+
+    const stream = client
+      .streamingRecognize({ config, interimResults: true, singleUtterance: false })
+      .on('error', (error) => {
+        console.error(`[WS Server Error ${sessionId}]`, error.message || error);
+        if (session && !session.streamErrorRecycled && ws.readyState === WebSocket.OPEN) {
+          console.log(`[WS Server] ${sessionId}: Attempting silent recovery on error...`);
+          session.streamErrorRecycled = true;
+          closeSessionStreamOnly(session);
+          createNewStreamForSession(session, ws);
+        } else {
+          if (ws.readyState === WebSocket.OPEN) {
+            ws.send(JSON.stringify({ type: 'error', message: error.message || 'STT stream error' }));
+          }
+          closeSession(ws, 'stream_error_max_retries');
+        }
+      })
+      .on('data', (data) => {
+        dataEventCount++;
+        const s = sessions.get(ws);
+        if (!s || !s.stream || !data.results?.length) return;
+
+        const result = data.results[0];
+        const alternative = result.alternatives?.[0];
+
+        if (alternative?.transcript) {
+          if (result.isFinal) {
+            finalCount++;
+            // console.log(`[DIAGNOSTIC ${sessionId}] FINAL #${finalCount}: "${alternative.transcript.substring(0, 40)}..."`);
+          }
+
+          let speakerTag = null;
+          if (result.isFinal && alternative.words && alternative.words.length > 0) {
+            const tags = alternative.words.map(w => w.speakerTag).filter(t => t !== undefined);
+            if (tags.length > 0) speakerTag = tags[tags.length - 1];
+          }
+
+          const event = {
+            type: result.isFinal ? 'final' : 'partial',
+            text: alternative.transcript,
+            speaker: s.speaker,
+            speakerTag,
+            isFinal: result.isFinal || false,
+            confidence: alternative.confidence || 0,
+            timestamp: Date.now(),
+          };
+
+          s.lastActivity = Date.now();
+          if (ws.readyState === WebSocket.OPEN) {
+            ws.send(JSON.stringify(event));
+          }
+        }
+      })
+      .on('end', () => {
+        if (session.stream !== stream) return;
+        console.log(`[WS Server ${sessionId}] Stream ended. Recycling silently...`);
+        closeSessionStreamOnly(session);
+        createNewStreamForSession(session, ws);
+      })
+      .on('close', () => {
+        if (session.stream !== stream) return;
+        console.log(`[WS Server ${sessionId}] Stream closed. Recycling silently...`);
+        closeSessionStreamOnly(session);
+        createNewStreamForSession(session, ws);
+      });
+
+    session.stream = stream;
+    session.streamErrorRecycled = false;
+    return stream;
   }
 
   // Create WebSocket server
@@ -168,7 +250,6 @@ async function startServer() {
     // Initialize Google STT
     try {
       const client = getSpeechClient();
-
       const config = {
         encoding: 'LINEAR16',
         sampleRateHertz: 16000,
@@ -178,7 +259,6 @@ async function startServer() {
         useEnhanced: true,
       };
 
-      // Add Diarization if requested
       if (diarize) {
         config.diarizationConfig = {
           enableSpeakerDiarization: true,
@@ -187,102 +267,19 @@ async function startServer() {
         };
       }
 
-      const streamingConfig = {
-        config,
-        interimResults: true,
-        singleUtterance: false,
-      };
-
-      // DIAGNOSTIC: Track stream state
-      let dataEventCount = 0;
-      let finalCount = 0;
-
-      const stream = client
-        .streamingRecognize(streamingConfig)
-        .on('error', (error) => {
-          console.error(`[WS Server Error ${sessionId}]`, error.message || error);
-          if (ws.readyState === WebSocket.OPEN) {
-            ws.send(JSON.stringify({
-              type: 'error',
-              message: error.message || 'STT stream error'
-            }));
-          }
-          closeSession(ws);
-        })
-        .on('data', (data) => {
-          dataEventCount++;
-          const session = sessions.get(ws);
-          if (!session) {
-            console.log(`[DIAGNOSTIC ${sessionId}] Received STT data but no session found`);
-            return;
-          }
-
-          if (data.results && data.results.length > 0) {
-            const result = data.results[0];
-            const alternative = result.alternatives?.[0];
-
-            if (alternative?.transcript) {
-              if (result.isFinal) {
-                finalCount++;
-                console.log(`[DIAGNOSTIC ${sessionId}] FINAL #${finalCount}: "${alternative.transcript.substring(0, 40)}..."`);
-              }
-
-              // Extract speaker tag if diarization is enabled
-              let speakerTag = null;
-              if (result.isFinal && alternative.words && alternative.words.length > 0) {
-                const tags = alternative.words.map(w => w.speakerTag).filter(t => t !== undefined);
-                if (tags.length > 0) {
-                  speakerTag = tags[tags.length - 1]; // Use last word's tag as the speaker for the sentence
-                }
-              }
-
-              const event = {
-                type: result.isFinal ? 'final' : 'partial',
-                text: alternative.transcript,
-                speaker: session.speaker,
-                speakerTag,
-                isFinal: result.isFinal || false,
-                confidence: alternative.confidence || 0,
-                timestamp: Date.now(),
-              };
-
-              session.lastActivity = Date.now();
-
-              if (ws.readyState === WebSocket.OPEN) {
-                ws.send(JSON.stringify(event));
-                console.log(`[WS Server] ${event.type === 'final' ? '✅' : '📝'} ${session.speaker}: "${event.text.substring(0, 60)}..." (data events: ${dataEventCount}, finals: ${finalCount})`);
-              } else {
-                console.log(`[WS Server] WebSocket not open, can't send: ${event.type}`);
-              }
-            }
-          } else {
-            console.log(`[DIAGNOSTIC ${sessionId}] Received STT data but no results`);
-          }
-        })
-        .on('end', () => {
-          console.log(`[DIAGNOSTIC ${sessionId}] STT stream END event - closing session`);
-          closeSession(ws);
-        })
-        .on('close', () => {
-          console.log(`[DIAGNOSTIC ${sessionId}] STT stream CLOSE event - closing session`);
-          closeSession(ws);
-        })
-        .on('drain', () => {
-          // No action needed for drain
-        })
-        .on('response', (response) => {
-          console.log(`[WS Server ${sessionId}] 📡 STT Stream Response Metadata:`, JSON.stringify(response));
-        });
-
-      sessions.set(ws, {
+      const session = {
         client,
-        stream,
+        stream: null,
         speaker,
         sessionId,
         lastActivity: Date.now(),
         totalBytesReceived: 0,
-        startTime: Date.now()
-      });
+        startTime: Date.now(),
+        config,
+        streamErrorRecycled: false
+      };
+      sessions.set(ws, session);
+      createNewStreamForSession(session, ws);
 
       // Send connected event
       ws.send(JSON.stringify({ type: 'connected', sessionId, speaker }));
