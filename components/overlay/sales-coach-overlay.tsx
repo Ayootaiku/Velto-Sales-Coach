@@ -883,6 +883,8 @@ export function SalesCoachOverlay() {
     }
     if (status !== 'listening' && status !== 'coaching') return
     if (connectionDeadRecoveryFiredRef.current) return
+    // In dual mode, skip 7s auto-restart: replacement connection often gets 1006 and loops; user can Start again manually
+    if (!isDiarized) return
     addLog('⚠️ Prospect disconnected; recovery in 7s if still disconnected')
     connectionDeadRecoveryTimerRef.current = setTimeout(() => {
       connectionDeadRecoveryTimerRef.current = null
@@ -897,7 +899,7 @@ export function SalesCoachOverlay() {
         connectionDeadRecoveryTimerRef.current = null
       }
     }
-  }, [status, prospectStream.isConnected, prospectStream.startAutomatic, addLog])
+  }, [status, prospectStream.isConnected, prospectStream.startAutomatic, addLog, isDiarized])
 
   const speechRecognition = useSpeechRecognition({
     onTranscript: (text) => {

@@ -321,10 +321,11 @@ export function useSTTStream(
       }
 
       const closeHandler = (e?: CloseEvent) => {
-        // TRACE E: sttStreamEnded (WebSocket close) — log code/reason to see who closed (1000=normal, 1006=abnormal/dropped)
+        // Close code: 1000=normal, 1006=abnormal (no close frame received — connection dropped)
         const code = e?.code ?? '?'
         const reason = e?.reason ?? '?'
-        console.log(`[TRACE-E] ${speaker} - WebSocket CLOSED code=${code} reason=${reason} (finals received: ${transcriptCountRef.current})`)
+        const sid = sessionIdRef.current
+        console.log(`[TRACE-E] ${speaker} - WebSocket CLOSED code=${code} reason=${reason} sessionId=${sid} (finals received: ${transcriptCountRef.current})`)
         setIsConnected(false)
         // #region agent log
         fetch('http://127.0.0.1:7473/ingest/898f3a90-8b17-490a-b181-c605f5b8779a',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'f351e8'},body:JSON.stringify({sessionId:'f351e8',hypothesisId:'A',location:'use-stt-stream-ws.ts:closeHandler',message:'setIsConnected(false) on WS close',data:{speaker,code,reason:String(reason)},timestamp:Date.now()})}).catch(()=>{});
