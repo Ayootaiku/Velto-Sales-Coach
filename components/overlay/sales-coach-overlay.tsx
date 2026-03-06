@@ -290,18 +290,6 @@ function SettingsPanel({
               </SelectContent>
             </Select>
           </div>
-
-          {/* Restart secret (optional): used when clicking Start New Session to trigger server restart workaround */}
-          <div className="space-y-2">
-            <Label className="text-[10px] uppercase font-bold text-zinc-500 tracking-widest">Restart secret (optional)</Label>
-            <Input
-              type="password"
-              value={localSettings.restartSecret ?? ''}
-              onChange={(e) => setLocalSettings({ ...localSettings, restartSecret: e.target.value || undefined })}
-              placeholder="Same value as RESTART_SECRET on server"
-              className="bg-[#27272a] border-[#3f3f46] text-white h-11 focus-visible:ring-[#d4ff32] focus-visible:ring-inset focus-visible:ring-2 focus-visible:ring-offset-0"
-            />
-          </div>
         </div>
       </ScrollArea>
 
@@ -1272,7 +1260,12 @@ export function SalesCoachOverlay() {
   }, [microphone, speechRecognition, salespersonStream, prospectStream])
 
   const handleStartNewSession = useCallback(async () => {
-    const secret = settings.restartSecret?.trim()
+    // Prefer build-time secret (VITE_RESTART_SECRET) so users never set it; fallback to settings for backwards compat
+    const secret = (
+      (typeof import.meta !== 'undefined' && (import.meta as { env?: { VITE_RESTART_SECRET?: string } }).env?.VITE_RESTART_SECRET) ||
+      settings.restartSecret ||
+      ''
+    ).trim()
     if (secret) {
       try {
         await fetch(getApiUrl('/api/restart'), {
