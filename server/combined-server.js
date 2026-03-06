@@ -53,7 +53,7 @@ function closeSession(ws, reason) {
   if (session) {
     try {
       if (session.stream) {
-        session.stream.removeAllListeners();
+        // Do NOT call removeAllListeners() to prevent unhandled 'error' events crashing the Node.js process
         session.stream.end();
       }
     } catch (e) { /* ignore */ }
@@ -186,7 +186,13 @@ function handleSTTConnection(ws, req) {
     const session = sessions.get(ws);
     if (!session || !session.stream) return;
     try {
-      if (typeof data === 'string' && data.includes('"type":"pong"')) return; // Ignore manual pongs
+      // Check if this is our small JSON 'pong' keep-alive packet (client side stringifies)
+      // Since ws receives strings as Buffers by default, we safely decode small data packets:
+      if (data.length < 50) {
+        const str = Buffer.isBuffer(data) ? data.toString('utf8') : data;
+        if (typeof str === 'string' && str.includes('"type":"pong"')) return;
+      }
+
       const buffer = Buffer.isBuffer(data) ? data : (typeof data === 'string' ? Buffer.from(data, 'base64') : null);
       if (buffer) {
         session.stream.write(buffer);

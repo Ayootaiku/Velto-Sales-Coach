@@ -124,7 +124,7 @@ async function startServer() {
     if (session) {
       try {
         if (session.stream) {
-          session.stream.removeAllListeners();
+          // Do NOT call removeAllListeners() to prevent unhandled 'error' events crashing the Node.js process
           session.stream.end();
         }
         console.log(`[WS Server] Session closed: ${session.sessionId}`);
@@ -312,11 +312,17 @@ async function startServer() {
 
       try {
         let buffer;
+
+        // Check if this is our small JSON 'pong' keep-alive packet (client side stringifies)
+        if (data.length < 50) {
+          const str = Buffer.isBuffer(data) ? data.toString('utf8') : data;
+          if (typeof str === 'string' && str.includes('"type":"pong"')) return;
+        }
+
         // Data should be PCM Int16 bytes
         if (Buffer.isBuffer(data)) {
           buffer = data;
         } else if (typeof data === 'string') {
-          if (data.includes('"type":"pong"')) return; // Ignore manual pongs
           // Handle base64 encoded PCM
           buffer = Buffer.from(data, 'base64');
         }
