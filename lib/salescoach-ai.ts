@@ -5,7 +5,8 @@
 
 let _apiBaseUrl = '';
 export function setApiBaseUrl(url: string) { _apiBaseUrl = url; }
-function apiUrl(path: string) { return _apiBaseUrl ? `${_apiBaseUrl}${path}` : path; }
+export function getApiUrl(path: string) { return _apiBaseUrl ? `${_apiBaseUrl}${path}` : path; }
+function apiUrl(path: string) { return getApiUrl(path); }
 
 export interface TranscriptTurn {
   speaker: 'salesperson' | 'prospect';

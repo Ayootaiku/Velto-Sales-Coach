@@ -13,6 +13,14 @@ const dotenv = require('dotenv');
 
 dotenv.config({ path: '.env.local' });
 
+// Prevent uncaught errors from killing the process (which would drop all WS with 1006)
+process.on('uncaughtException', (err) => {
+  console.error('[WS Server] ⚠️ uncaughtException (preventing crash):', err?.message || err);
+});
+process.on('unhandledRejection', (reason, p) => {
+  console.error('[WS Server] ⚠️ unhandledRejection (preventing crash):', reason);
+});
+
 // Railway/Cloud: Load Google credentials from env var if no local file exists
 if (process.env.GOOGLE_APPLICATION_CREDENTIALS_JSON) {
   try {

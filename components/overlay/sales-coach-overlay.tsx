@@ -32,7 +32,7 @@ import {
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { Button } from "@/components/ui/button"
 import { Slider } from "@/components/ui/slider"
-import { generateLiveCoaching, generatePostCallSummary, type TranscriptTurn } from "@/lib/salescoach-ai"
+import { generateLiveCoaching, generatePostCallSummary, getApiUrl, type TranscriptTurn } from "@/lib/salescoach-ai"
 import { processTranscriptUltraFast, type TranscriptTurn as CopilotTurn } from "@/lib/salescoach-copilot"
 import { createTurnManager } from "@/lib/turn-manager"
 
@@ -45,6 +45,8 @@ export interface CoachSettings {
   primaryObjective: string;
   keyDifferentiators: string;
   objectionMode: 'Soft Reframe' | 'Hard Pushback' | 'Question-Based' | 'Story-Based';
+  /** Optional: secret for POST /api/restart (stored in settings, not in bundle). */
+  restartSecret?: string;
 }
 
 // Helper component to handle async summary generation
@@ -288,6 +290,18 @@ function SettingsPanel({
               </SelectContent>
             </Select>
           </div>
+
+          {/* Restart secret (optional): used when clicking Start New Session to trigger server restart workaround */}
+          <div className="space-y-2">
+            <Label className="text-[10px] uppercase font-bold text-zinc-500 tracking-widest">Restart secret (optional)</Label>
+            <Input
+              type="password"
+              value={localSettings.restartSecret ?? ''}
+              onChange={(e) => setLocalSettings({ ...localSettings, restartSecret: e.target.value || undefined })}
+              placeholder="Same value as RESTART_SECRET on server"
+              className="bg-[#27272a] border-[#3f3f46] text-white h-11 focus-visible:ring-[#d4ff32] focus-visible:ring-inset focus-visible:ring-2 focus-visible:ring-offset-0"
+            />
+          </div>
         </div>
       </ScrollArea>
 
@@ -322,6 +336,9 @@ export function SalesCoachOverlay() {
   const [manualSpeaker, setManualSpeaker] = useState<'salesperson' | 'prospect'>('salesperson')
   const manualSpeakerRef = useRef<'salesperson' | 'prospect'>('salesperson')
   const [showSettings, setShowSettings] = useState(false)
+  const [restartTriggered, setRestartTriggered] = useState(false)
+  const [restartComplete, setRestartComplete] = useState(false)
+  const [restartLoading, setRestartLoading] = useState(false)
   const [settings, setSettings] = useState<CoachSettings>({
     emotionStyle: 'Empathetic',
     companyName: '',
@@ -1054,6 +1071,10 @@ export function SalesCoachOverlay() {
   }, [manualSpeaker, isDiarized, status, salespersonStream.startAutomatic, addLog])
 
   const handleStartCoaching = useCallback(async (mode: 'dual' | 'diarized' = 'dual') => {
+    setRestartTriggered(false)
+    setRestartComplete(true)
+    setRestartLoading(false)
+
     const diarize = mode === 'diarized'
 
     // In-room: go to next screen immediately so button "works", request mic (extension: optional permission first, then getUserMedia — same as website prompt)
@@ -1250,6 +1271,68 @@ export function SalesCoachOverlay() {
     setDebugLogs([])
   }, [microphone, speechRecognition, salespersonStream, prospectStream])
 
+  const handleStartNewSession = useCallback(async () => {
+    const secret = settings.restartSecret?.trim()
+    if (secret) {
+      try {
+        await fetch(getApiUrl('/api/restart'), {
+          method: 'POST',
+          headers: { 'X-Restart-Secret': secret },
+        })
+      } catch (_) {
+        /* ignore */
+      }
+      setRestartTriggered(true)
+      setRestartComplete(false)
+    }
+    await handleReset()
+  }, [settings.restartSecret, handleReset])
+
+  // Background poll for "restart complete" when on home and restart was triggered
+  useEffect(() => {
+    if (status !== 'ready' || !restartTriggered || restartComplete) return
+    const interval = setInterval(async () => {
+      try {
+        const res = await fetch(getApiUrl('/api/health'))
+        if (res.ok) {
+          setRestartComplete(true)
+          setRestartTriggered(false)
+        }
+      } catch (_) {
+        /* ignore */
+      }
+    }, 2500)
+    return () => clearInterval(interval)
+  }, [status, restartTriggered, restartComplete])
+
+  const tryStartSession = useCallback(
+    async (mode: 'dual' | 'diarized') => {
+      if (restartTriggered && !restartComplete) {
+        setRestartLoading(true)
+        while (true) {
+          try {
+            const res = await fetch(getApiUrl('/api/health'))
+            if (res.ok) break
+          } catch (_) {
+            /* ignore */
+          }
+          await new Promise((r) => setTimeout(r, 2000))
+        }
+        setRestartComplete(true)
+        setRestartTriggered(false)
+        setRestartLoading(false)
+      }
+      const inExtension = typeof chrome !== 'undefined' && !!chrome.runtime?.id
+      if (mode === 'diarized' && inExtension) {
+        const websiteUrl = 'https://velto-sales-coach-production.up.railway.app'
+        window.open(`${websiteUrl}?start=inroom`, '_blank')
+        return
+      }
+      handleStartCoaching(mode)
+    },
+    [restartTriggered, restartComplete, handleStartCoaching]
+  )
+
   const formatTime = (s: number) => {
     const m = Math.floor(s / 60)
     const sec = s % 60
@@ -1284,7 +1367,13 @@ export function SalesCoachOverlay() {
       </div>
 
       <div className="flex-1 overflow-y-auto no-scrollbar max-h-[600px] flex flex-col relative bg-[#18181b]">
-        {status === "ready" && (
+        {status === "ready" && restartLoading && (
+          <div className="flex flex-col items-center justify-center h-[480px] text-zinc-400 bg-[#18181b]">
+            <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-emerald-500 mb-4" />
+            <p className="text-sm">Preparing new session...</p>
+          </div>
+        )}
+        {status === "ready" && !restartLoading && (
           <div className="flex-1 flex flex-col items-center justify-center p-8 text-center min-h-[480px] bg-[#18181b]">
             {/* Position wave audio visualization UP in empty space */}
             <div className="w-[150%] -ml-[25%] h-48 mb-4 opacity-60 mix-blend-screen flex items-center justify-center -mt-16 relative z-0 pointer-events-none">
@@ -1300,22 +1389,14 @@ export function SalesCoachOverlay() {
               <div className="flex flex-col gap-3 w-full px-6">
                 <button
                   type="button"
-                  onClick={() => handleStartCoaching('dual')}
+                  onClick={() => tryStartSession('dual')}
                   className="w-full py-3.5 rounded-xl bg-[#d4ff32] hover:bg-[#e0ff66] text-[#000000] text-[13px] font-bold tracking-wide transition-all shadow-lg shadow-[#d4ff32]/10"
                 >
                   Start Session
                 </button>
                 <button
                   type="button"
-                  onClick={() => {
-                    const inExtension = typeof chrome !== 'undefined' && !!chrome.runtime?.id
-                    if (inExtension) {
-                      const websiteUrl = 'https://velto-sales-coach-production.up.railway.app'
-                      window.open(`${websiteUrl}?start=inroom`, '_blank')
-                      return
-                    }
-                    handleStartCoaching('diarized')
-                  }}
+                  onClick={() => tryStartSession('diarized')}
                   className="w-full py-3.5 rounded-xl bg-transparent border border-[#3f3f46] hover:bg-[#2c2c2e] text-[#ffffff] text-[13px] font-bold tracking-wide transition-all"
                 >
                   In-Room Mode
@@ -1387,7 +1468,7 @@ export function SalesCoachOverlay() {
           <div className="flex-1 p-5 min-h-[480px]">
             <AsyncSummaryGenerator
               generator={summaryGenerator}
-              onClose={handleReset}
+              onClose={handleStartNewSession}
             />
           </div>
         )}
