@@ -263,11 +263,11 @@ function handleSTTConnection(ws, req) {
   ws.on('close', (code, reason) => {
     const session = sessions.get(ws);
     console.log('[WS] close', { code, reason: reason?.toString?.(), sessionId: session?.sessionId });
-    closeSession(ws, 'client_close_' + code);
+    closeSession(ws, 'client_close_' + code); // removes session from sessions Map so new connections are not blocked
   });
   ws.on('error', (err) => {
     console.error('[WS] error', err);
-    closeSession(ws, 'client_error');
+    closeSession(ws, 'client_error'); // cleanup on error too so session is always removed
   });
 }
 

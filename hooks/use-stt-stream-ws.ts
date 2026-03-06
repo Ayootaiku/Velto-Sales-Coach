@@ -81,6 +81,7 @@ export function useSTTStream(
   const onSpeechEndRef = useRef(onSpeechEnd)
   const onSpeakerTurnRef = useRef(onSpeakerTurn)
   const isDiarizedRef = useRef(false)
+  const startInProgressRef = useRef(false)
 
   // DEDUPLICATION: Track server-finalized text to prevent double finalization
   const serverFinalizedTextRef = useRef<string>('')
@@ -179,6 +180,11 @@ export function useSTTStream(
 
 
   const startStream = useCallback(async (speaker: 'salesperson' | 'prospect', audioStream?: MediaStream, diarize = false) => {
+    if (startInProgressRef.current) {
+      console.warn(`[WS STT ${speaker}] startStream ignored - already in progress`)
+      return
+    }
+    startInProgressRef.current = true
     try {
       speakerRef.current = speaker
       isDiarizedRef.current = diarize
@@ -488,6 +494,10 @@ export function useSTTStream(
       }, CONNECTION_HEALTH_CHECK_MS)
 
       console.log(`[WS STT ${speaker}] ✅ Audio processing started (stream active: ${audioStreamToUse.active})`)
+      // Ensure prospect STT indicator is true when pipeline is fully up (first or second session)
+      if (wsRef.current?.readyState === WebSocket.OPEN) {
+        setIsConnected(true)
+      }
       console.warn(`[WATCHDOG] *** ENABLED *** ${speaker}: No-audio 15s | Connection-health 20s | Overlay recovery 7s (no reconnect on close, no silence restart)`)
       console.log(`[WATCHDOG] ${speaker} - Watchdogs active: no-audio 15s, connection-health 20s`)
 
@@ -503,6 +513,8 @@ export function useSTTStream(
     } catch (err) {
       console.error(`[WS STT ${speaker}] ❌ Error starting stream:`, err)
       setError(err instanceof Error ? err.message : 'Failed to start stream')
+    } finally {
+      startInProgressRef.current = false
     }
   }, [connectWebSocket, resampleAudio, calculateRMS]) // Removed isStreaming dependency
 

@@ -380,6 +380,9 @@ export function SalesCoachOverlay() {
   const partialDraftShownRef = useRef(false)
   const didAutoStartInRoomRef = useRef(false)
   const hasHadPreviousSessionRef = useRef(false)
+  const isStartingDualRef = useRef(false)
+  /** Tab-capture stream from getDisplayMedia (dual mode); stopped explicitly on end call so browser releases "Sharing this tab" */
+  const prospectCaptureStreamRef = useRef<MediaStream | null>(null)
 
   // DEDUPLICATION: Track last processed transcript to prevent duplicate callbacks
   const lastProcessedTranscriptRef = useRef<string>('')
@@ -1099,53 +1102,69 @@ export function SalesCoachOverlay() {
 
     // Dual mode: getDisplayMedia FIRST (user gesture) then setState
     setIsDiarized(false)
+    if (isStartingDualRef.current) {
+      addLog("Already starting session, please wait.")
+      return
+    }
+    isStartingDualRef.current = true
     addLog("Starting session (DUAL mode)...")
 
-    console.log('[SECOND-SESSION] About to call getDisplayMedia, hasHadPreviousSession:', hasHadPreviousSessionRef.current)
-    if (hasHadPreviousSessionRef.current) {
-      await new Promise((r) => setTimeout(r, 400))
-    }
-
-    let capturedStream: MediaStream | null = null
     try {
-      capturedStream = await (navigator as any).mediaDevices.getDisplayMedia({
-        audio: true,
-        video: true
-      })
-    } catch (displayErr) {
-      console.error('[SECOND-SESSION] getDisplayMedia failed:', displayErr)
-      addLog("Display media denied or cancelled.")
-      return
-    }
-    if (!capturedStream) {
-      addLog("❌ Failed to get display media stream")
-      return
-    }
-    console.log('[SECOND-SESSION] getDisplayMedia resolved, stream.active:', !!capturedStream?.active, 'audioTracks:', capturedStream?.getAudioTracks?.()?.length, 'firstTrackState:', capturedStream?.getAudioTracks?.()?.[0]?.readyState)
-    const audioTrack = capturedStream.getAudioTracks()[0]
-    if (!audioTrack || audioTrack.readyState !== 'live' || !capturedStream.active) {
-      console.warn('[SECOND-SESSION] Stream validation failed:', { hasTrack: !!audioTrack, readyState: audioTrack?.readyState, streamActive: capturedStream?.active })
-      addLog("❌ Tab share invalid or ended. Check 'Share tab audio' and try again.")
-      capturedStream.getTracks().forEach((t: MediaStreamTrack) => t.stop())
-      return
-    }
+      console.log('[SECOND-SESSION] About to call getDisplayMedia, hasHadPreviousSession:', hasHadPreviousSessionRef.current)
+      if (hasHadPreviousSessionRef.current) {
+        await new Promise((r) => setTimeout(r, 400))
+      }
 
-    resetTrace()
-    setStatus("listening")
-    setCallTime(0)
-    setCards([])
-    transcriptTurnsRef.current = []
+      let capturedStream: MediaStream | null = null
+      try {
+        capturedStream = await (navigator as any).mediaDevices.getDisplayMedia({
+          audio: true,
+          video: true
+        })
+      } catch (displayErr) {
+        console.error('[SECOND-SESSION] getDisplayMedia failed:', displayErr)
+        addLog("Display media denied or cancelled.")
+        return
+      }
+      if (!capturedStream) {
+        addLog("❌ Failed to get display media stream")
+        return
+      }
+      console.log('[SECOND-SESSION] getDisplayMedia resolved, stream.active:', !!capturedStream?.active, 'audioTracks:', capturedStream?.getAudioTracks?.()?.length, 'firstTrackState:', capturedStream?.getAudioTracks?.()?.[0]?.readyState)
+      const audioTrack = capturedStream.getAudioTracks()[0]
+      if (!audioTrack || audioTrack.readyState !== 'live' || !capturedStream.active) {
+        console.warn('[SECOND-SESSION] Stream validation failed:', { hasTrack: !!audioTrack, readyState: audioTrack?.readyState, streamActive: capturedStream?.active })
+        addLog("❌ Tab share invalid or ended. Check 'Share tab audio' and try again.")
+        capturedStream.getTracks().forEach((t: MediaStreamTrack) => t.stop())
+        return
+      }
 
-    addLog("Initializing dual-stream prospect audio...")
-    const prospectResult = await setupProspectStream(capturedStream)
-    if (!prospectResult) {
-      addLog("❌ CRITICAL: Prospect stream failed - no prospect audio captured!")
-      setCards([{
-        id: 'error-' + Date.now(),
-        suggestion: "⚠️ Prospect audio not captured",
-        reason: "Click Start and choose the tab with prospect audio (check Share tab audio).",
-        type: 'reframe'
-      }])
+      addLog("Initializing dual-stream prospect audio...")
+      prospectCaptureStreamRef.current = capturedStream
+      const prospectResult = await setupProspectStream(capturedStream)
+      if (!prospectResult) {
+        if (prospectCaptureStreamRef.current) {
+          prospectCaptureStreamRef.current.getTracks().forEach((t: MediaStreamTrack) => t.stop())
+          prospectCaptureStreamRef.current = null
+        }
+        addLog("❌ CRITICAL: Prospect stream failed - no prospect audio captured!")
+        setStatus("ready")
+        setCards([{
+          id: 'error-' + Date.now(),
+          suggestion: "⚠️ Prospect audio not captured",
+          reason: "Click Start and choose the tab with prospect audio (check Share tab audio).",
+          type: 'reframe'
+        }])
+        return
+      }
+      // Set status only after prospect stream is connected so "listening" effects see consistent state
+      resetTrace()
+      setStatus("listening")
+      setCallTime(0)
+      setCards([])
+      transcriptTurnsRef.current = []
+    } finally {
+      isStartingDualRef.current = false
     }
   }, [salespersonStream, addLog, resetTrace, updateTrace])
 
@@ -1166,6 +1185,10 @@ export function SalesCoachOverlay() {
     setStatus("summary")
     microphone.stopListening()
     speechRecognition.stopListening()
+    if (prospectCaptureStreamRef.current) {
+      prospectCaptureStreamRef.current.getTracks().forEach((t: MediaStreamTrack) => t.stop())
+      prospectCaptureStreamRef.current = null
+    }
     await salespersonStream.stopStream()
     await prospectStream.stopStream()
     if (fallbackTimerRef.current) {
@@ -1186,6 +1209,10 @@ export function SalesCoachOverlay() {
   const handleReset = useCallback(async () => {
     microphone.stopListening()
     speechRecognition.stopListening()
+    if (prospectCaptureStreamRef.current) {
+      prospectCaptureStreamRef.current.getTracks().forEach((t: MediaStreamTrack) => t.stop())
+      prospectCaptureStreamRef.current = null
+    }
     await salespersonStream.stopStream()
     await prospectStream.stopStream()
 
