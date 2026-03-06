@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 
 const RAILWAY_GRAPHQL = 'https://backboard.railway.com/graphql/v2';
-const RESTART_COOLDOWN_MS = 60_000;
+const RESTART_COOLDOWN_MS = 0;
 let lastRestartAt = 0;
 
 export async function POST(request: Request) {
