@@ -226,6 +226,7 @@ export function useSTTStream(
       const ws = await connectWebSocket(speaker, newSessionId, diarize)
       wsRef.current = ws
       setIsConnected(true)
+      if (speaker === 'prospect') console.log('[prospect] stream connected = true')
       // #region agent log
       fetch('http://127.0.0.1:7473/ingest/898f3a90-8b17-490a-b181-c605f5b8779a', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': 'f351e8' }, body: JSON.stringify({ sessionId: 'f351e8', hypothesisId: 'B', location: 'use-stt-stream-ws.ts:startStream', message: 'setIsConnected(true) after connectWebSocket', data: { speaker, sessionId: newSessionId }, timestamp: Date.now() }) }).catch(() => { });
       // #endregion
@@ -240,6 +241,8 @@ export function useSTTStream(
           if (data.type === 'connected') {
             console.log(`[TRACE-B] ${speaker} - STT stream CREATED`)
             reconnectAttemptsRef.current = 0 // Reset attempts on successful connection
+            setIsConnected(true)
+            if (speaker === 'prospect') console.log('[prospect] stream connected = true (server confirmed)')
             return
           }
 
@@ -496,6 +499,7 @@ export function useSTTStream(
       // Ensure prospect STT indicator is true when pipeline is fully up (first or second session)
       if (wsRef.current?.readyState === WebSocket.OPEN) {
         setIsConnected(true)
+        if (speaker === 'prospect') console.log('[prospect] stream connected = true (pipeline up)')
       }
       console.warn(`[WATCHDOG] *** ENABLED *** ${speaker}: No-audio 15s | Connection-health 20s | Overlay recovery 7s (no reconnect on close, no silence restart)`)
       console.log(`[WATCHDOG] ${speaker} - Watchdogs active: no-audio 15s, connection-health 20s`)
