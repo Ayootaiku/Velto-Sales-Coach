@@ -1347,7 +1347,7 @@ export function SalesCoachOverlay() {
       <div className="h-14 flex items-center justify-between px-5 bg-[#18181b] shrink-0">
         <div className="flex items-center gap-2.5">
           <div className={cn("w-1.5 h-1.5 rounded-full", status === "ready" ? "bg-[#52525b]" : "bg-[#eaf57e] animate-pulse")} />
-          <span className="text-[10px] font-semibold text-[#fafafa] uppercase tracking-widest">veltoo sales coach</span>
+          <span className="text-[10px] font-semibold text-[#fafafa] uppercase tracking-widest">velto sales coach</span>
           {(status === "listening" || status === "coaching") && (
             <span className="text-[10px] text-[#a1a1aa] font-mono bg-[#27272a] px-2 py-0.5 rounded-full border border-[#3f3f46]">{formatTime(callTime)}</span>
           )}
