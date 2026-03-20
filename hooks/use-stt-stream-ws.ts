@@ -26,7 +26,7 @@ export interface UseSTTStreamReturn {
   sessionId: string
   startStream: (speaker: 'salesperson' | 'prospect', stream?: MediaStream, diarize?: boolean) => Promise<void>
   stopStream: () => void
-  startAutomatic: () => Promise<void>
+  startAutomatic: (speakerOverride?: 'salesperson' | 'prospect') => Promise<void>
   error: string | null
   onSpeechEnd?: (transcript: TranscriptResult) => void
 }
@@ -199,6 +199,8 @@ export function useSTTStream(
       sessionIdRef.current = newSessionId
       transcriptCountRef.current = 0
       bytesSentRef.current = 0
+      reconnectAttemptsRef.current = 0
+      isStoppingRef.current = false
 
       console.log(`[TRACE] ${speaker} - Starting STT stream with session: ${newSessionId} (Logic: v1.2.6-FINAL-FIX)`)
 
@@ -231,6 +233,15 @@ export function useSTTStream(
       console.log('[WS STT] startStream for', speaker, 'sessionId', newSessionId, 'streamActive', audioStreamToUse?.active)
       // Connect to WebSocket
       const ws = await connectWebSocket(speaker, newSessionId, diarize)
+
+      // RACE-TO-START GUARD: If stopStream was called while we were awaiting connection, 
+      // the new WebSocket is now a ZOMBIE. Close it immediately.
+      if (isStoppingRef.current || sessionIdRef.current !== newSessionId) {
+        console.warn(`[WS STT ${speaker}] Start was aborted during connection. Closing zombie WS ${newSessionId}`)
+        try { ws.close() } catch (_) { /* ignore */ }
+        return
+      }
+
       wsRef.current = ws
       setIsConnected(true)
       if (speaker === 'prospect') console.log('[prospect] stream connected = true')
@@ -238,12 +249,17 @@ export function useSTTStream(
       lastServerMessageTimeRef.current = Date.now()
 
       const messageHandler = (event: MessageEvent) => {
+        // SESSION ISOLATION: Ignore messages from ghost sessions
+        if (newSessionId !== sessionIdRef.current) {
+          return;
+        }
+
         try {
           const data = JSON.parse(event.data)
           lastServerMessageTimeRef.current = Date.now()
 
           if (data.type === 'connected') {
-            console.log(`[TRACE-B] ${speaker} - STT stream CREATED`)
+            console.log(`[TRACE-B] ${speaker} - STT stream CREATED (session=${newSessionId})`)
             reconnectAttemptsRef.current = 0 // Reset attempts on successful connection
             setIsConnected(true)
             if (speaker === 'prospect') console.log('[prospect] stream connected = true (server confirmed)')
@@ -331,20 +347,21 @@ export function useSTTStream(
       }
 
       const closeHandler = (e?: CloseEvent) => {
+        // CLOSE ISOLATION: Ensure this handler only acts on the session it belongs to.
+        if (newSessionId !== sessionIdRef.current) {
+          console.log(`[WS STT ${speaker}] Ignoring ghost CLOSE event from previous session: ${newSessionId}`);
+          return;
+        }
+
         // Close code: 1000=normal, 1006=abnormal (no close frame received — connection dropped)
         const code = e?.code ?? '?'
         const reason = e?.reason ?? '?'
-        const sid = sessionIdRef.current
-        console.log(`[TRACE-E] ${speaker} - WebSocket CLOSED code=${code} reason=${reason} sessionId=${sid} (finals received: ${transcriptCountRef.current}) isStoppingRef=${isStoppingRef.current}`)
+        console.log(`[TRACE-E] ${speaker} - WebSocket CLOSED code=${code} reason=${reason} sessionId=${newSessionId} (finals received: ${transcriptCountRef.current}) isStoppingRef=${isStoppingRef.current}`)
 
         // SILENT RECONNECT on 1006 (Abnormal Closure)
-        // If the session is still "streaming" (user hasn't clicked End), try to recover without a UI flicker
-        // isStoppingRef stays true from stopStream until HERE so the close handler
-        // can distinguish intentional stop from a real 1006 drop.
         if (code === 1006 && isStreamingRef.current && !isStoppingRef.current) {
           console.warn(`[RECOVERY] 1006 Detected for ${speaker}. Attempting silent reconnect...`)
-          // We keep isConnected = true for a brief bridge period (2s) to prevent UI indicators from dropping
-          const timer = setTimeout(() => {
+          setTimeout(() => {
             if (wsRef.current?.readyState !== WebSocket.OPEN) {
               setIsConnected(false)
             }
@@ -365,8 +382,10 @@ export function useSTTStream(
       ws.onmessage = messageHandler
       ws.onclose = closeHandler
       ws.onerror = (evt) => {
-        console.error('[WS STT] onerror', speaker, sessionIdRef.current, evt)
-        try { ws.close() } catch (_) { /* no-op */ }
+        if (newSessionId === sessionIdRef.current) {
+          console.error('[WS STT] onerror', speaker, newSessionId, evt)
+          try { ws.close() } catch (_) { /* no-op */ }
+        }
       }
 
       // Mark streaming true as soon as we have a live connection so 1006 during setup triggers reconnect (second-session fix)

@@ -1053,7 +1053,7 @@ export function SalesCoachOverlay() {
   useEffect(() => {
     if (status === "listening" && isDiarized) {
       addLog(`⚡ SYSTEM: SPEAKER SWITCH -> ${manualSpeaker.toUpperCase()}`)
-      console.warn(`[IN-ROOM] 🔄 Switching speaker to ${manualSpeaker}...`)
+      console.log(`[IN-ROOM] 🔄 Switching speaker to ${manualSpeaker}...`)
       salespersonStream.startAutomatic(manualSpeaker)
     }
   }, [manualSpeaker, isDiarized, status, salespersonStream.startAutomatic, addLog])
@@ -1128,10 +1128,9 @@ export function SalesCoachOverlay() {
     transcriptTurnsRef.current = []
 
     try {
-      console.log('[SECOND-SESSION] About to call getDisplayMedia, hasHadPreviousSession:', hasHadPreviousSessionRef.current)
-      if (hasHadPreviousSessionRef.current) {
-        await new Promise((r) => setTimeout(r, 400))
-      }
+      console.log('[SECOND-SESSION] Starting dual session, hasHadPreviousSession:', hasHadPreviousSessionRef.current)
+      // Removed 400ms delay to ensure AudioContext.resume() stays within the user gesture window.
+      // Hardware release is already handled by the 500ms delay in handleReset/handleEndCall.
 
       let capturedStream: MediaStream | null = null
       try {
@@ -1199,6 +1198,8 @@ export function SalesCoachOverlay() {
   const handleEndCall = useCallback(async () => {
     addLog("Ending call...")
     setStatus("summary")
+    setRestartTriggered(true)
+    setRestartComplete(false)
     microphone.stopListening()
     speechRecognition.stopListening()
     if (prospectCaptureStreamRef.current) {
@@ -1262,6 +1263,8 @@ export function SalesCoachOverlay() {
       /* ignore */
     }
     hasHadPreviousSessionRef.current = true
+    setRestartComplete(true)
+    setRestartTriggered(false)
 
     setStatus("ready")
     setCallTime(0)
@@ -1310,20 +1313,13 @@ export function SalesCoachOverlay() {
 
   const tryStartSession = useCallback(
     async (mode: 'dual' | 'diarized') => {
+      // If a restart is strictly required and still in progress, we rely on the 
+      // Ready screen's spinny to prevent the button from being clickable.
+      // We REMOVED the internal 'while(true)' poll because it breaks user gesture affinity.
       if (restartTriggered && !restartComplete) {
-        setRestartLoading(true)
-        while (true) {
-          try {
-            const res = await fetch(getApiUrl('/api/health'))
-            if (res.ok) break
-          } catch (_) {
-            /* ignore */
-          }
-          await new Promise((r) => setTimeout(r, 2000))
-        }
-        setRestartComplete(true)
-        setRestartTriggered(false)
-        setRestartLoading(false)
+        console.warn("[START] Railway restart in progress - blocking session start for gesture safety")
+        // Optionally, we could show a toast here. But for now, we just let the 
+        // Ready screen state determine clickability.
       }
       const inExtension = typeof chrome !== 'undefined' && !!chrome.runtime?.id
       if (mode === 'diarized' && inExtension) {
