@@ -185,6 +185,11 @@ export function useSTTStream(
       return
     }
     startInProgressRef.current = true
+
+    // Reset intentional-close flag for fresh session so legitimate 1006s
+    // during this session will correctly trigger reconnect
+    isStoppingRef.current = false
+
     try {
       speakerRef.current = speaker
       isDiarizedRef.current = diarize
@@ -330,10 +335,12 @@ export function useSTTStream(
         const code = e?.code ?? '?'
         const reason = e?.reason ?? '?'
         const sid = sessionIdRef.current
-        console.log(`[TRACE-E] ${speaker} - WebSocket CLOSED code=${code} reason=${reason} sessionId=${sid} (finals received: ${transcriptCountRef.current})`)
+        console.log(`[TRACE-E] ${speaker} - WebSocket CLOSED code=${code} reason=${reason} sessionId=${sid} (finals received: ${transcriptCountRef.current}) isStoppingRef=${isStoppingRef.current}`)
 
         // SILENT RECONNECT on 1006 (Abnormal Closure)
         // If the session is still "streaming" (user hasn't clicked End), try to recover without a UI flicker
+        // isStoppingRef stays true from stopStream until HERE so the close handler
+        // can distinguish intentional stop from a real 1006 drop.
         if (code === 1006 && isStreamingRef.current && !isStoppingRef.current) {
           console.warn(`[RECOVERY] 1006 Detected for ${speaker}. Attempting silent reconnect...`)
           // We keep isConnected = true for a brief bridge period (2s) to prevent UI indicators from dropping
@@ -350,6 +357,8 @@ export function useSTTStream(
           return
         }
 
+        // NOW safe to reset — the 1006 check above already saw the true value
+        isStoppingRef.current = false
         setIsConnected(false)
       }
 
@@ -633,7 +642,11 @@ export function useSTTStream(
         console.log(`[TRACE-STOP] ${speakerRef.current} - Stream stopped for ${sessionId}`)
       }
     } finally {
-      isStoppingRef.current = false
+      // NOTE: Do NOT reset isStoppingRef here.
+      // It must stay true until the WebSocket close event fires so the
+      // closeHandler can distinguish an intentional stop from a real 1006.
+      // It is reset in closeHandler (after the 1006 check) and in
+      // startStream (at the top, for a fresh session).
     }
   }, [])
 
