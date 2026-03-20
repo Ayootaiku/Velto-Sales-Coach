@@ -83,6 +83,7 @@ export function useSTTStream(
   const isDiarizedRef = useRef(false)
   const startInProgressRef = useRef(false)
   const watchdogEnabledRef = useRef(false)
+  const externalSessionIdRef = useRef<string | null>(null)
 
   // DEDUPLICATION: Track server-finalized text to prevent double finalization
   const serverFinalizedTextRef = useRef<string>('')
@@ -214,6 +215,7 @@ export function useSTTStream(
 
       // Generate session ID or use external one
       const newSessionId = externalSessionId || `${speaker}-${Date.now()}-${Math.random().toString(36).substring(2, 8)}`
+      externalSessionIdRef.current = externalSessionId || null
       sessionIdRef.current = newSessionId
       transcriptCountRef.current = 0
       bytesSentRef.current = 0
@@ -703,9 +705,9 @@ export function useSTTStream(
       if (existingStream && existingStream.getTracks().some(t => t.readyState === 'ended')) {
         console.warn(`[TRACE-AUTO] ${speaker} - Existing stream died during restart. Dropping.`)
         // Pass undefined to force re-acquisition
-        await startStream(speaker, undefined, isDiarizedRef.current)
+        await startStream(speaker, undefined, isDiarizedRef.current, externalSessionIdRef.current || undefined)
       } else {
-        await startStream(speaker, existingStream || undefined, isDiarizedRef.current)
+        await startStream(speaker, existingStream || undefined, isDiarizedRef.current, externalSessionIdRef.current || undefined)
       }
       console.log(`[TRACE-AUTO] ${speaker} - ✅ AUTO-START COMPLETE (Context Recreated)`)
     } catch (err) {

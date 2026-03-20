@@ -1225,6 +1225,7 @@ export function SalesCoachOverlay() {
     setStatus("summary")
     setRestartTriggered(true)
     setRestartComplete(false)
+    setRestartLoading(true) // Ensure loading state is active for the next ready screen
     
     // 4. Hardware Termination (Non-blocking)
     try {
@@ -1257,25 +1258,64 @@ export function SalesCoachOverlay() {
     setSalespersonTag(null)
     setManualSpeaker('salesperson')
     
-    // 5. Fire Railway Restart (Fire-and-forget)
+    // 5. Fire Railway Restart (Mutation)
+    const triggerRailwayRestart = async () => {
+      try {
+        console.log("[END] Triggering Railway restart via GraphQL...")
+        let token: string | null = null
+        
+        // Try extension storage first
+        if (typeof chrome !== 'undefined' && chrome.storage?.local) {
+          const result = await chrome.storage.local.get('railwayToken') as { railwayToken?: string }
+          if (result.railwayToken) token = result.railwayToken
+        }
+        
+        // Final fallback to the one you provided in .env.local (mapped here)
+        token = token || '66f64273-0737-4ace-8d8d-376c72e367b1'
+        
+        const res = await fetch("https://backboard.railway.com/graphql/v2", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "Authorization": `Bearer ${token}`
+          },
+          body: JSON.stringify({
+            query: `mutation {
+              serviceInstanceRedeploy(
+                environmentId: "6d92c2f8-c6ef-4c19-9d54-15ae3f44a875",
+                serviceId: "22b80c46-93ff-4f71-9e73-d560bf3f2798"
+              )
+            }`
+          })
+        })
+        
+        const data = await res.json()
+        if (data.errors) {
+          console.warn("[END] Railway restart GraphQL errors:", data.errors)
+        } else {
+          console.log("[END] Railway restart triggered successfully")
+        }
+      } catch (err) {
+        console.warn("[END] Railway restart failed:", err)
+      }
+    }
+
+    // Run restart
+    triggerRailwayRestart()
+
+    // 6. Old-style secret fallback (for non-token sessions)
     const restartSecret =
       (typeof import.meta !== 'undefined' && (import.meta as any).env?.VITE_RESTART_SECRET) ||
       (typeof process !== 'undefined' && (process as any).env?.RESTART_SECRET) ||
       ''
     if (restartSecret) {
-      console.log("[END] Triggering Railway restart...")
       fetch(getApiUrl('/api/restart'), {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
           'X-Restart-Secret': restartSecret,
         },
-      })
-        .then((res) => res.json())
-        .then((data) => console.log('[End Call] Railway restart success:', data))
-        .catch((err) => console.warn('[End Call] Railway restart error (non-blocking):', err))
-    } else {
-      console.warn('[End Call] No RESTART_SECRET available — skipping Railway restart')
+      }).catch(_ => {/* already handled by GraphQL */})
     }
   }, [microphone, speechRecognition, salespersonStream, prospectStream, addLog])
 
@@ -1299,8 +1339,8 @@ export function SalesCoachOverlay() {
       /* ignore */
     }
     hasHadPreviousSessionRef.current = true
-    setRestartComplete(true)
-    setRestartTriggered(false)
+    // Do NOT set restartComplete=true here; let the health check poll finish it
+    // setRestartTriggered(false) // Do NOT clear this either
 
     setStatus("ready")
     setCallTime(0)
@@ -1338,8 +1378,10 @@ export function SalesCoachOverlay() {
       try {
         const res = await fetch(getApiUrl('/api/health'))
         if (res.ok) {
+          console.log('[SESSION] Health check passed, server ready.')
           setRestartComplete(true)
           setRestartTriggered(false)
+          setRestartLoading(false)
         }
       } catch (_) {
         /* ignore */
@@ -1418,13 +1460,13 @@ export function SalesCoachOverlay() {
       </div>
 
       <div className="flex-1 overflow-y-auto no-scrollbar max-h-[600px] flex flex-col relative bg-[#18181b]">
-        {status === "ready" && restartLoading && (
+        {status === "ready" && !restartComplete && (
           <div className="flex flex-col items-center justify-center h-[480px] text-zinc-400 bg-[#18181b]">
             <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-emerald-500 mb-4" />
             <p className="text-sm">Preparing new session...</p>
           </div>
         )}
-        {status === "ready" && !restartLoading && (
+        {status === "ready" && restartComplete && (
           <div className="flex-1 flex flex-col items-center justify-center p-8 text-center min-h-[480px] bg-[#18181b]">
             {/* Position wave audio visualization UP in empty space */}
             <div className="w-[150%] -ml-[25%] h-48 mb-4 opacity-60 mix-blend-screen flex items-center justify-center -mt-16 relative z-0 pointer-events-none">
