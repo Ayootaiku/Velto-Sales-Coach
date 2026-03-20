@@ -1196,18 +1196,48 @@ export function SalesCoachOverlay() {
   }, [handleStartCoaching])
 
   const handleEndCall = useCallback(async () => {
-    addLog("Ending call...")
+    addLog("[END] Rebuilding session termination flow...")
+    
+    // 1. Mark streams as stopping IMMEDIATELY to prevent recovery race conditions
+    // and log current state for debugging the 1006/1000 issue
+    console.log(`[END] ENDING CALL - State before cleanup:`, {
+      salesWs: salespersonStream.isConnected ? 'OPEN' : 'CLOSED',
+      prospectWs: prospectStream.isConnected ? 'OPEN' : 'CLOSED',
+      salesStreaming: salespersonStream.isStreaming,
+      prospectStreaming: prospectStream.isStreaming
+    })
+
+    // 2. Close STT Streams (Full Reset) - Move to start of flow
+    // We call stopStream(false, true) to force a total hardware reset (closing AudioContext)
+    // This sets isStoppingRef.current = true synchronously so any 1006 will be ignored.
+    const streamStopPromise = Promise.all([
+      salespersonStream.stopStream(false, true),
+      prospectStream.stopStream(false, true)
+    ]).catch(e => console.warn("[END] Stream termination error:", e))
+
+    // 3. Switch UI to summary state
     setStatus("summary")
     setRestartTriggered(true)
     setRestartComplete(false)
-    microphone.stopListening()
-    speechRecognition.stopListening()
-    if (prospectCaptureStreamRef.current) {
-      prospectCaptureStreamRef.current.getTracks().forEach((t: MediaStreamTrack) => t.stop())
-      prospectCaptureStreamRef.current = null
+    
+    // 4. Hardware Termination (Non-blocking)
+    try {
+      microphone.stopListening()
+      speechRecognition.stopListening()
+      
+      if (prospectCaptureStreamRef.current) {
+        console.log("[END] Stopping tab-capture media tracks")
+        prospectCaptureStreamRef.current.getTracks().forEach((t: MediaStreamTrack) => t.stop())
+        prospectCaptureStreamRef.current = null
+      }
+    } catch (e) {
+      console.warn("[END] Hardware termination error:", e)
     }
-    await salespersonStream.stopStream()
-    await prospectStream.stopStream()
+
+    // Wait for streams to finish closing before moving on
+    await streamStopPromise
+
+    // 5. Timer & Coaching State Cleanup
     if (fallbackTimerRef.current) {
       clearTimeout(fallbackTimerRef.current)
       fallbackTimerRef.current = null
@@ -1218,16 +1248,16 @@ export function SalesCoachOverlay() {
     }
     isCoachingInProgressRef.current = false
     setUseWebSpeechFallback(false)
-    setDebugLogs([])
     setSalespersonTag(null)
     setManualSpeaker('salesperson')
-
-    // Fire-and-forget: trigger Railway redeployment via existing /api/restart endpoint
+    
+    // 5. Fire Railway Restart (Fire-and-forget)
     const restartSecret =
       (typeof import.meta !== 'undefined' && (import.meta as any).env?.VITE_RESTART_SECRET) ||
       (typeof process !== 'undefined' && (process as any).env?.RESTART_SECRET) ||
       ''
     if (restartSecret) {
+      console.log("[END] Triggering Railway restart...")
       fetch(getApiUrl('/api/restart'), {
         method: 'POST',
         headers: {
@@ -1236,8 +1266,8 @@ export function SalesCoachOverlay() {
         },
       })
         .then((res) => res.json())
-        .then((data) => console.log('[End Call] Railway restart triggered:', data))
-        .catch((err) => console.warn('[End Call] Railway restart failed (non-blocking):', err))
+        .then((data) => console.log('[End Call] Railway restart success:', data))
+        .catch((err) => console.warn('[End Call] Railway restart error (non-blocking):', err))
     } else {
       console.warn('[End Call] No RESTART_SECRET available — skipping Railway restart')
     }

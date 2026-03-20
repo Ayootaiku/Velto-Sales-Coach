@@ -25,7 +25,7 @@ export interface UseSTTStreamReturn {
   transcriptCount: number
   sessionId: string
   startStream: (speaker: 'salesperson' | 'prospect', stream?: MediaStream, diarize?: boolean) => Promise<void>
-  stopStream: () => void
+  stopStream: (keepTracks?: boolean, forceKillContext?: boolean) => Promise<void>
   startAutomatic: (speakerOverride?: 'salesperson' | 'prospect') => Promise<void>
   error: string | null
   onSpeechEnd?: (transcript: TranscriptResult) => void
@@ -82,6 +82,7 @@ export function useSTTStream(
   const onSpeakerTurnRef = useRef(onSpeakerTurn)
   const isDiarizedRef = useRef(false)
   const startInProgressRef = useRef(false)
+  const watchdogEnabledRef = useRef(false)
 
   // DEDUPLICATION: Track server-finalized text to prevent double finalization
   const serverFinalizedTextRef = useRef<string>('')
@@ -399,7 +400,8 @@ export function useSTTStream(
       if (speaker === 'prospect') console.log('[prospect] stream connected = true')
       setError(null)
       lastServerMessageTimeRef.current = Date.now()
-
+      watchdogEnabledRef.current = true
+      
       // Mark streaming true as soon as we have a live connection so 1006 during setup triggers reconnect (second-session fix)
       setIsStreaming(true)
       isStreamingRef.current = true
@@ -542,9 +544,10 @@ export function useSTTStream(
       watchdogIntervalRef.current = setInterval(() => {
         const now = Date.now()
         const timeSinceLastAudio = now - lastAudioProcessTimeRef.current
-
+        const isWatchdogActive = watchdogEnabledRef.current
+ 
         // Only restart if no audio callbacks for 15s (was 5s — avoid killing during tab throttle or slow capture start)
-        if (isStreamingRef.current && timeSinceLastAudio > 15000) {
+        if (isWatchdogActive && isStreamingRef.current && timeSinceLastAudio > 15000) {
           console.warn(`[WATCHDOG] ${speaker} - 🔥 NO AUDIO CAPTURE FOR ${timeSinceLastAudio}ms. FORCE RESTARTING...`)
           startAutomatic()
         }
@@ -555,7 +558,8 @@ export function useSTTStream(
       healthCheckIntervalRef.current = setInterval(() => {
         const now = Date.now()
         const timeSinceLastServerMessage = now - lastServerMessageTimeRef.current
-        if (lastServerMessageTimeRef.current > 0 && isStreamingRef.current && timeSinceLastServerMessage > CONNECTION_HEALTH_DEAD_MS) {
+        const isWatchdogActive = watchdogEnabledRef.current
+        if (isWatchdogActive && lastServerMessageTimeRef.current > 0 && isStreamingRef.current && timeSinceLastServerMessage > CONNECTION_HEALTH_DEAD_MS) {
           console.warn(`[WATCHDOG] ${speaker} - No server message for ${timeSinceLastServerMessage}ms. FORCE RESTARTING...`)
           startAutomatic()
         }
@@ -587,106 +591,91 @@ export function useSTTStream(
     }
   }, [connectWebSocket, resampleAudio, calculateRMS]) // Removed isStreaming dependency
 
-  const stopStream = useCallback(async (keepTracks = false) => {
-    if (isStoppingRef.current) return
+  const stopStream = useCallback(async (keepTracks = false, forceKillContext = false) => {
+    // Prevent double-stopping
+    if (isStoppingRef.current && !forceKillContext) return
     isStoppingRef.current = true
 
     const sessionId = sessionIdRef.current
-    console.log(`[TRACE-STOP] ${speakerRef.current} - stopStream(keepTracks=${keepTracks}) for ${sessionId}`)
+    const speaker = speakerRef.current
+    console.log(`[STOP] ${speaker} - Rebuilding session termination (sessionId=${sessionId}, keepTracks=${keepTracks})`)
 
-    // Temporary: capture refs to log before/after cleanup (remove after confirming root cause)
-    const wsCapture = wsRef.current
-    const ctxCapture = audioContextRef.current
-    console.log('🔴 ENDING CALL - State before cleanup:', {
-      wsState: wsCapture?.readyState,
-      audioState: ctxCapture?.state,
-      sessionActive: isStreamingRef.current,
-      speaker: speakerRef.current
-    })
+    // 1. Immediately disable UI and state
+    setIsStreaming(false)
+    isStreamingRef.current = false
+    watchdogEnabledRef.current = false
+    setIsConnected(false)
+    reconnectAttemptsRef.current = 0
 
-    try {
-      setIsStreaming(false)
-      isStreamingRef.current = false
-      reconnectAttemptsRef.current = 0
-      setIsConnected(false) // End Call: clear indicator so UI shows grey until next session connects
-      // Reset refs so next start does not immediately trigger watchdog or stale UI
-      lastAudioProcessTimeRef.current = Date.now()
-      lastActiveTimeRef.current = Date.now()
-
-      if (wsRef.current && sessionIdRef.current === sessionId) {
-        wsRef.current.onclose = null // Prevent triggering auto-reconnect
-        wsRef.current.close()
-        wsRef.current = null
-      }
-
-      if (scriptProcessorRef.current && sessionIdRef.current === sessionId) {
-        try {
-          scriptProcessorRef.current.onaudioprocess = null
-          scriptProcessorRef.current.disconnect()
-        } catch (e) {
-          console.warn('Error disconnecting scriptProcessor:', e)
-        }
-        scriptProcessorRef.current = null
-      }
-
-      if (sourceRef.current && sessionIdRef.current === sessionId) {
-        try {
-          sourceRef.current.disconnect()
-        } catch (e) {
-          console.warn('Error disconnecting source:', e)
-        }
-        sourceRef.current = null
-      }
-
-      // Force closure of AudioContext to release hardware locks for the next session.
-      // browsers (Chrome) has a limit on active contexts.
-      const audioContext = audioContextRef.current
-      if (audioContext && (!keepTracks || ((window as any).forceKillContext))) {
-        try {
-          console.log(`[WS STT ${speakerRef.current}] Explicitly closing AudioContext (forcing=${!!(window as any).forceKillContext})`)
-          if (audioContext.state !== 'closed') {
-            await audioContext.close()
-          }
-        } catch (e) {
-          console.warn('Error closing AudioContext:', e)
-        }
-        if (sessionIdRef.current === sessionId) {
-          audioContextRef.current = null
-        }
-      }
-
-      if (sessionIdRef.current === sessionId) {
-        if (watchdogIntervalRef.current) {
-          clearInterval(watchdogIntervalRef.current)
-          watchdogIntervalRef.current = null
-        }
-        if (healthCheckIntervalRef.current) {
-          clearInterval(healthCheckIntervalRef.current)
-          healthCheckIntervalRef.current = null
-        }
-        if (watchdogAliveIntervalRef.current) {
-          clearInterval(watchdogAliveIntervalRef.current)
-          watchdogAliveIntervalRef.current = null
-        }
-      }
-
-      if (streamRef.current && !keepTracks && sessionIdRef.current === sessionId) {
-        try {
-          streamRef.current.getTracks().forEach(track => track.stop())
-        } catch (e) {
-          console.warn('Error stopping stream tracks:', e)
-          streamRef.current = null
-        }
-
-        console.log(`[TRACE-STOP] ${speakerRef.current} - Stream stopped for ${sessionId}`)
-      }
-    } finally {
-      // NOTE: Do NOT reset isStoppingRef here.
-      // It must stay true until the WebSocket close event fires so the
-      // closeHandler can distinguish an intentional stop from a real 1006.
-      // It is reset in closeHandler (after the 1006 check) and in
-      // startStream (at the top, for a fresh session).
+    // 2. Clear ALL Watchdogs immediately so no restarts happen during cleanup
+    if (watchdogIntervalRef.current) {
+      clearInterval(watchdogIntervalRef.current)
+      watchdogIntervalRef.current = null
     }
+    if (healthCheckIntervalRef.current) {
+      clearInterval(healthCheckIntervalRef.current)
+      healthCheckIntervalRef.current = null
+    }
+    if (watchdogAliveIntervalRef.current) {
+      clearInterval(watchdogAliveIntervalRef.current)
+      watchdogAliveIntervalRef.current = null
+    }
+
+    // 3. Close WebSocket and detach handlers
+    if (wsRef.current) {
+      console.log(`[STOP] ${speaker} - Closing WebSocket`)
+      const ws = wsRef.current
+      ws.onmessage = null
+      ws.onclose = null
+      ws.onerror = null
+      if (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING) {
+        console.log(`[STOP] ${speaker} - Sending explicit closure: 1000 'Session ended'`)
+        try { ws.close(1000, 'Session ended') } catch (_) { /* ignore */ }
+      }
+      wsRef.current = null
+    }
+
+    // 4. Disconnect and Dispose Audio Nodes
+    if (scriptProcessorRef.current) {
+      try {
+        scriptProcessorRef.current.onaudioprocess = null
+        scriptProcessorRef.current.disconnect()
+      } catch (_) { /* ignore */ }
+      scriptProcessorRef.current = null
+    }
+
+    if (sourceRef.current) {
+      try {
+        sourceRef.current.disconnect()
+      } catch (_) { /* ignore */ }
+      sourceRef.current = null
+    }
+
+    // 5. Hard Reset AudioContext to free hardware locks
+    const audioContext = audioContextRef.current
+    if (audioContext && (!keepTracks || forceKillContext)) {
+      console.log(`[STOP] ${speaker} - Closing AudioContext to release hardware`)
+      try {
+        if (audioContext.state !== 'closed') {
+          await audioContext.close()
+        }
+      } catch (e) {
+        console.warn('[STOP] AudioContext close error:', e)
+      }
+      audioContextRef.current = null
+    }
+
+    // 6. Stop MediaStream Tracks (unless requested to keep alive, e.g. for In-Room rollover)
+    if (streamRef.current && !keepTracks) {
+      console.log(`[STOP] ${speaker} - Stopping MediaStream tracks`)
+      try {
+        streamRef.current.getTracks().forEach(track => track.stop())
+      } catch (_) { /* ignore */ }
+      streamRef.current = null
+    }
+
+    console.log(`[STOP] ${speaker} - Termination complete for ${sessionId}`)
+    // NOTE: isStoppingRef stays true until a fresh startStream resets it.
   }, [])
 
   const startAutomatic = useCallback(async (speakerOverride?: 'salesperson' | 'prospect') => {
@@ -701,11 +690,9 @@ export function useSTTStream(
 
     console.log(`[TRACE-AUTO] ${speaker} - 🔄 Starting NEW stream automatically (replacing ${oldSessionId})...`)
 
-      // 1. Stop processing but keep audio tracks alive to avoid reprompting
-      // FORCE KILL: Signal stopStream to kill the AudioContext even though we keep tracks
-      ; (window as any).forceKillContext = true
-    await stopStream(true) // Ensure it finishes closing
-      ; (window as any).forceKillContext = false
+    // 1. Stop processing but keep audio tracks alive to avoid reprompting
+    // We pass true for forceKillContext to ensure the AudioContext is fully reset
+    await stopStream(true, true)
 
     // 2. Delay so hardware/stack is released before new stream (reduces TRACE-C gap on restart)
     await new Promise(resolve => setTimeout(resolve, 800))
