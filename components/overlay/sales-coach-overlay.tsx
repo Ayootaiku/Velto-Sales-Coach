@@ -1264,10 +1264,15 @@ export function SalesCoachOverlay() {
         console.log("[END] Triggering Railway restart via GraphQL...")
         let token: string | null = null
         
-        // Try extension storage first
-        if (typeof chrome !== 'undefined' && chrome.storage?.local) {
-          const result = await chrome.storage.local.get('railwayToken') as { railwayToken?: string }
-          if (result.railwayToken) token = result.railwayToken
+        // Try extension storage first (safely)
+        const inExtension = typeof chrome !== 'undefined' && !!chrome.runtime?.id
+        if (inExtension && chrome.storage?.local) {
+          try {
+            const result = await chrome.storage.local.get('railwayToken') as { railwayToken?: string }
+            if (result.railwayToken) token = result.railwayToken
+          } catch (e) {
+            console.warn("[END] Chrome storage retrieval failed:", e)
+          }
         }
         
         // Final fallback to the one you provided in .env.local (mapped here)
@@ -1291,12 +1296,12 @@ export function SalesCoachOverlay() {
         
         const data = await res.json()
         if (data.errors) {
-          console.warn("[END] Railway restart GraphQL errors:", data.errors)
+          console.warn("[END] RESTART_MUTATION_FAILED:", data.errors)
         } else {
-          console.log("[END] Railway restart triggered successfully")
+          console.log("[END] RESTART_MUTATION_SUCCESS:", data)
         }
       } catch (err) {
-        console.warn("[END] Railway restart failed:", err)
+        console.warn("[END] RESTART_MUTATION_CRASH:", err)
       }
     }
 
