@@ -135,7 +135,14 @@ export function useSTTStream(
   }, [])
 
   // Connect to WebSocket server (cloud WSS or local port discovery)
-  const connectWebSocket = useCallback(async (speaker: 'salesperson' | 'prospect', sessionId: string, diarize = false): Promise<WebSocket> => {
+  const connectWebSocket = useCallback(async (
+    speaker: 'salesperson' | 'prospect', 
+    sessionId: string, 
+    diarize = false,
+    onMessage?: (e: MessageEvent) => void,
+    onClose?: (e: CloseEvent) => void,
+    onError?: (e: Event) => void
+  ): Promise<WebSocket> => {
     const params = `?session=${sessionId}&speaker=${speaker}${diarize ? '&diarize=true' : ''}`
 
     // Production/Manifest standard: prioritize cloud production server (Railway) to ensure website matches extension performance
@@ -151,8 +158,13 @@ export function useSTTStream(
       return new Promise((resolve, reject) => {
         console.log(`[TRACE-A] ${speaker} - Connecting to cloud WSS: ${cloudBase}`)
         const ws = new WebSocket(`${cloudBase}${params}`)
+        if (onMessage) ws.onmessage = onMessage
+        if (onClose) ws.onclose = onClose
         ws.onopen = () => { console.log(`[TRACE-A] ${speaker} - Cloud WSS CONNECTED`); resolve(ws) }
-        ws.onerror = () => { reject(new Error('Cloud WSS failed')) }
+        ws.onerror = (e) => { 
+          if (onError) onError(e)
+          reject(new Error('Cloud WSS failed')) 
+        }
       })
     }
 
@@ -160,8 +172,13 @@ export function useSTTStream(
       return new Promise((resolve, reject) => {
         console.log(`[TRACE-A] ${speaker} - Trying WebSocket on port ${port}... (diarize: ${diarize})`)
         const ws = new WebSocket(`ws://localhost:${port}${params}`)
+        if (onMessage) ws.onmessage = onMessage
+        if (onClose) ws.onclose = onClose
         ws.onopen = () => { console.log(`[TRACE-A] ${speaker} - WebSocket CONNECTED on port ${port}`); resolve(ws) }
-        ws.onerror = () => { reject(new Error(`Failed on port ${port}`)) }
+        ws.onerror = (e) => { 
+          if (onError) onError(e)
+          reject(new Error(`Failed on port ${port}`)) 
+        }
       })
     }
 
@@ -176,7 +193,7 @@ export function useSTTStream(
     }
     console.error(`[WS STT ${speaker}] All ports failed (3002-3010)`)
     throw lastError || new Error('WebSocket connection failed - server may not be running')
-  }, [])
+  }, [_wssBaseUrl])
 
 
   const startStream = useCallback(async (speaker: 'salesperson' | 'prospect', audioStream?: MediaStream, diarize = false) => {
@@ -229,24 +246,6 @@ export function useSTTStream(
         })
       }
       streamRef.current = audioStreamToUse
-
-      console.log('[WS STT] startStream for', speaker, 'sessionId', newSessionId, 'streamActive', audioStreamToUse?.active)
-      // Connect to WebSocket
-      const ws = await connectWebSocket(speaker, newSessionId, diarize)
-
-      // RACE-TO-START GUARD: If stopStream was called while we were awaiting connection, 
-      // the new WebSocket is now a ZOMBIE. Close it immediately.
-      if (isStoppingRef.current || sessionIdRef.current !== newSessionId) {
-        console.warn(`[WS STT ${speaker}] Start was aborted during connection. Closing zombie WS ${newSessionId}`)
-        try { ws.close() } catch (_) { /* ignore */ }
-        return
-      }
-
-      wsRef.current = ws
-      setIsConnected(true)
-      if (speaker === 'prospect') console.log('[prospect] stream connected = true')
-      setError(null)
-      lastServerMessageTimeRef.current = Date.now()
 
       const messageHandler = (event: MessageEvent) => {
         // SESSION ISOLATION: Ignore messages from ghost sessions
@@ -379,14 +378,27 @@ export function useSTTStream(
         setIsConnected(false)
       }
 
-      ws.onmessage = messageHandler
-      ws.onclose = closeHandler
-      ws.onerror = (evt) => {
+      console.log('[WS STT] startStream for', speaker, 'sessionId', newSessionId, 'streamActive', audioStreamToUse?.active)
+      // Connect to WebSocket with handlers attached from the start
+      const ws = await connectWebSocket(speaker, newSessionId, diarize, messageHandler, closeHandler, (evt) => {
         if (newSessionId === sessionIdRef.current) {
-          console.error('[WS STT] onerror', speaker, newSessionId, evt)
-          try { ws.close() } catch (_) { /* no-op */ }
+          console.error('[WS STT] WebSocket failed to connect or error during handshake', speaker, newSessionId, evt)
         }
+      })
+
+      // RACE-TO-START GUARD: If stopStream was called while we were awaiting connection, 
+      // the new WebSocket is now a ZOMBIE. Close it immediately.
+      if (isStoppingRef.current || sessionIdRef.current !== newSessionId) {
+        console.warn(`[WS STT ${speaker}] Start was aborted during connection. Closing zombie WS ${newSessionId}`)
+        try { ws.close() } catch (_) { /* ignore */ }
+        return
       }
+
+      wsRef.current = ws
+      setIsConnected(true)
+      if (speaker === 'prospect') console.log('[prospect] stream connected = true')
+      setError(null)
+      lastServerMessageTimeRef.current = Date.now()
 
       // Mark streaming true as soon as we have a live connection so 1006 during setup triggers reconnect (second-session fix)
       setIsStreaming(true)
@@ -394,9 +406,16 @@ export function useSTTStream(
 
       // Set up Web Audio API for PCM capture
       // Always create a new AudioContext so every session is fresh (avoids "works once" after refresh).
-      // Web Audio API cleanup happens entirely in stopStream now to avoid race conditions.
       const existingCtx = audioContextRef.current
       if (existingCtx) {
+        console.log(`[WS STT ${speaker}] Cleaning up previous AudioContext before new session...`)
+        try {
+          if (existingCtx.state !== 'closed') {
+            await existingCtx.close()
+          }
+        } catch (e) {
+          console.warn('Error closing old AudioContext during restart:', e)
+        }
         audioContextRef.current = null
       }
       const audioContext = new (window.AudioContext || (window as any).webkitAudioContext)()
@@ -619,13 +638,14 @@ export function useSTTStream(
         sourceRef.current = null
       }
 
-      // Only close AudioContext if we are NOT doing a rollover (keepTracks = false)
-      // OR if we are forcing a full hardware reset (forceKillContext = true)
-      // This is crucial for fixing the "In-Room Death" bug
-      if (audioContextRef.current && (!keepTracks || ((window as any).forceKillContext))) {
+      // Force closure of AudioContext to release hardware locks for the next session.
+      // browsers (Chrome) has a limit on active contexts.
+      const audioContext = audioContextRef.current
+      if (audioContext && (!keepTracks || ((window as any).forceKillContext))) {
         try {
-          if (audioContextRef.current.state !== 'closed') {
-            await audioContextRef.current.close()
+          console.log(`[WS STT ${speakerRef.current}] Explicitly closing AudioContext (forcing=${!!(window as any).forceKillContext})`)
+          if (audioContext.state !== 'closed') {
+            await audioContext.close()
           }
         } catch (e) {
           console.warn('Error closing AudioContext:', e)

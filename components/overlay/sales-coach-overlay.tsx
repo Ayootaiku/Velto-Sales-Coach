@@ -1313,14 +1313,29 @@ export function SalesCoachOverlay() {
 
   const tryStartSession = useCallback(
     async (mode: 'dual' | 'diarized') => {
-      // If a restart is strictly required and still in progress, we rely on the 
-      // Ready screen's spinny to prevent the button from being clickable.
-      // We REMOVED the internal 'while(true)' poll because it breaks user gesture affinity.
+      // If a restart is strictly required and still in progress, we POLL until healthy.
+      // This is necessary because startStream will fail immediately if Railway isn't up.
       if (restartTriggered && !restartComplete) {
-        console.warn("[START] Railway restart in progress - blocking session start for gesture safety")
-        // Optionally, we could show a toast here. But for now, we just let the 
-        // Ready screen state determine clickability.
+        setRestartLoading(true)
+        console.warn("[START] Railway restart in progress - waiting for health check...")
+        let attempts = 0
+        while (attempts < 30) { // Max 60s
+          try {
+            const res = await fetch(getApiUrl('/api/health'))
+            if (res.ok) {
+              setRestartComplete(true)
+              setRestartTriggered(false)
+              setRestartLoading(false)
+              break
+            }
+          } catch (_) {
+            /* ignore */
+          }
+          attempts++
+          await new Promise((r) => setTimeout(r, 2000))
+        }
       }
+
       const inExtension = typeof chrome !== 'undefined' && !!chrome.runtime?.id
       if (mode === 'diarized' && inExtension) {
         const websiteUrl = 'https://velto-sales-coach-production.up.railway.app'
