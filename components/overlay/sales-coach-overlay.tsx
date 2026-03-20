@@ -1120,6 +1120,13 @@ export function SalesCoachOverlay() {
     isStartingDualRef.current = true
     addLog("Starting session (DUAL mode)...")
 
+    // IMMEDIATE TRANSITION for better UX
+    resetTrace()
+    setStatus("listening")
+    setCallTime(0)
+    setCards([])
+    transcriptTurnsRef.current = []
+
     try {
       console.log('[SECOND-SESSION] About to call getDisplayMedia, hasHadPreviousSession:', hasHadPreviousSessionRef.current)
       if (hasHadPreviousSessionRef.current) {
@@ -1135,10 +1142,12 @@ export function SalesCoachOverlay() {
       } catch (displayErr) {
         console.error('[SECOND-SESSION] getDisplayMedia failed:', displayErr)
         addLog("Display media denied or cancelled.")
+        setStatus("ready")
         return
       }
       if (!capturedStream) {
         addLog("❌ Failed to get display media stream")
+        setStatus("ready")
         return
       }
       console.log('[SECOND-SESSION] getDisplayMedia resolved, stream.active:', !!capturedStream?.active, 'audioTracks:', capturedStream?.getAudioTracks?.()?.length, 'firstTrackState:', capturedStream?.getAudioTracks?.()?.[0]?.readyState)
@@ -1147,6 +1156,7 @@ export function SalesCoachOverlay() {
         console.warn('[SECOND-SESSION] Stream validation failed:', { hasTrack: !!audioTrack, readyState: audioTrack?.readyState, streamActive: capturedStream?.active })
         addLog("❌ Tab share invalid or ended. Check 'Share tab audio' and try again.")
         capturedStream.getTracks().forEach((t: MediaStreamTrack) => t.stop())
+        setStatus("ready")
         return
       }
 
@@ -1169,11 +1179,6 @@ export function SalesCoachOverlay() {
         return
       }
       // Set status only after prospect stream is connected so "listening" effects see consistent state
-      resetTrace()
-      setStatus("listening")
-      setCallTime(0)
-      setCards([])
-      transcriptTurnsRef.current = []
     } finally {
       isStartingDualRef.current = false
     }
@@ -1215,6 +1220,26 @@ export function SalesCoachOverlay() {
     setDebugLogs([])
     setSalespersonTag(null)
     setManualSpeaker('salesperson')
+
+    // Fire-and-forget: trigger Railway redeployment via existing /api/restart endpoint
+    const restartSecret =
+      (typeof import.meta !== 'undefined' && (import.meta as any).env?.VITE_RESTART_SECRET) ||
+      (typeof process !== 'undefined' && (process as any).env?.RESTART_SECRET) ||
+      ''
+    if (restartSecret) {
+      fetch(getApiUrl('/api/restart'), {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Restart-Secret': restartSecret,
+        },
+      })
+        .then((res) => res.json())
+        .then((data) => console.log('[End Call] Railway restart triggered:', data))
+        .catch((err) => console.warn('[End Call] Railway restart failed (non-blocking):', err))
+    } else {
+      console.warn('[End Call] No RESTART_SECRET available — skipping Railway restart')
+    }
   }, [microphone, speechRecognition, salespersonStream, prospectStream, addLog])
 
   const handleReset = useCallback(async () => {

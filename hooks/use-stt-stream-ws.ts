@@ -138,15 +138,16 @@ export function useSTTStream(
   const connectWebSocket = useCallback(async (speaker: 'salesperson' | 'prospect', sessionId: string, diarize = false): Promise<WebSocket> => {
     const params = `?session=${sessionId}&speaker=${speaker}${diarize ? '&diarize=true' : ''}`
 
-    // Extension: always use Railway (setter, then Vite define, then hardcoded fallback — never localhost)
+    // Production/Manifest standard: prioritize cloud production server (Railway) to ensure website matches extension performance
     const inExtension = typeof chrome !== 'undefined' && !!chrome.runtime?.id
     const railwayWss = (typeof import.meta !== 'undefined' && (import.meta as { env?: { VITE_RAILWAY_WSS?: string } }).env?.VITE_RAILWAY_WSS) || ''
     const railwayFallback = 'wss://velto-sales-coach-production.up.railway.app'
-    const cloudBase = inExtension
-      ? (_wssBaseUrl || railwayWss || railwayFallback)
-      : (_wssBaseUrl || railwayWss || '')
+
+    // TRACE-A Log enhancement for visibility: Universal fallback to production just like manifest context
+    const cloudBase = _wssBaseUrl || railwayWss || railwayFallback
 
     if (cloudBase) {
+      console.log(`[TRACE-A] ${speaker} - Using production system (Cloud): ${cloudBase}`)
       return new Promise((resolve, reject) => {
         console.log(`[TRACE-A] ${speaker} - Connecting to cloud WSS: ${cloudBase}`)
         const ws = new WebSocket(`${cloudBase}${params}`)
@@ -164,7 +165,8 @@ export function useSTTStream(
       })
     }
 
-    const ports = [3002, 3003, 3004, 3005, 3006, 3007, 3008, 3009, 3010]
+    const currentPort = typeof window !== 'undefined' ? parseInt(window.location.port) : 0
+    const ports = Array.from(new Set([currentPort, 3000, 3002, 3003, 3004, 3005, 3006, 3007, 3008, 3009, 3010].filter(p => p > 0)))
     let lastError: Error | null = null
     for (const port of ports) {
       try { return await tryPort(port) } catch (err) {
