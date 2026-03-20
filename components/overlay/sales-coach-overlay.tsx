@@ -317,6 +317,7 @@ export function SalesCoachOverlay() {
   const [transcript, setTranscript] = useState("")
   const [isPaused, setIsPaused] = useState(false)
   const [manualInput, setManualInput] = useState("")
+  const [currentCallId, setCurrentCallId] = useState<string | null>(null)
   const [showManualInput, setShowManualInput] = useState(false)
   const [useWebSpeechFallback, setUseWebSpeechFallback] = useState(false)
   const [debugLogs, setDebugLogs] = useState<string[]>([])
@@ -420,7 +421,7 @@ export function SalesCoachOverlay() {
             await new Promise(r => setTimeout(r, 250));
           }
 
-          const summary = await generatePostCallSummary(transcriptTurnsRef.current);
+          const summary = await generatePostCallSummary(transcriptTurnsRef.current, currentCallId || undefined);
 
           return {
             outcome: summary?.outcome?.result || "Unknown",
@@ -932,7 +933,7 @@ export function SalesCoachOverlay() {
 
   // Note: Draft coaching disabled - only AI-generated cards will show
 
-  const setupProspectStream = async (capturedStream?: MediaStream | null) => {
+  const setupProspectStream = async (capturedStream?: MediaStream | null, externalCallId?: string) => {
     try {
       let stream: MediaStream | null = null
       if (capturedStream) {
@@ -973,7 +974,7 @@ export function SalesCoachOverlay() {
       addLog("✅ Audio track captured")
       const audioStream = new MediaStream([audioTrack])
       try {
-        await prospectStream.startStream('prospect', audioStream)
+        await prospectStream.startStream('prospect', audioStream, false, externalCallId)
       } catch (startErr: any) {
         const msg = startErr?.message || String(startErr)
         addLog(`❌ ${msg.includes('inactive') || msg.includes('ended') ? 'Tab share ended — please click Start and share the tab again.' : msg}`)
@@ -1059,6 +1060,11 @@ export function SalesCoachOverlay() {
   }, [manualSpeaker, isDiarized, status, salespersonStream.startAutomatic, addLog])
 
   const handleStartCoaching = useCallback(async (mode: 'dual' | 'diarized' = 'dual') => {
+    // Generate a unique call ID for this entire session
+    const callId = crypto.randomUUID()
+    setCurrentCallId(callId)
+    console.log(`[SESSION] Kicking off new session with ID: ${callId}`)
+
     setRestartTriggered(false)
     setRestartComplete(true)
     setRestartLoading(false)
@@ -1091,7 +1097,7 @@ export function SalesCoachOverlay() {
         .then((micStreamForDiarized: MediaStream) => {
           addLog("🚀 INITIALIZING IN-ROOM CAPTURE (Diarization V1.2)...")
           updateTrace({ A: true, turnId: 0 })
-          salespersonStream.startStream('salesperson', micStreamForDiarized, true).then(() => {
+          salespersonStream.startStream('salesperson', micStreamForDiarized, true, callId).then(() => {
             addLog("✅ WEBSOCKET CONNECTED - Port 3002")
             addLog("🎙️ CAPTURE ACTIVE: Use the buttons to switch speakers.")
           }).catch((e: any) => {
@@ -1161,7 +1167,7 @@ export function SalesCoachOverlay() {
 
       addLog("Initializing dual-stream prospect audio...")
       prospectCaptureStreamRef.current = capturedStream
-      const prospectResult = await setupProspectStream(capturedStream)
+      const prospectResult = await setupProspectStream(capturedStream, callId)
       if (!prospectResult) {
         if (prospectCaptureStreamRef.current) {
           prospectCaptureStreamRef.current.getTracks().forEach((t: MediaStreamTrack) => t.stop())
@@ -1316,6 +1322,7 @@ export function SalesCoachOverlay() {
     isCoachingInProgressRef.current = false
     setUseWebSpeechFallback(false)
     setDebugLogs([])
+    setCurrentCallId(null)
   }, [microphone, speechRecognition, salespersonStream, prospectStream])
 
   const handleStartNewSession = useCallback(async () => {

@@ -213,9 +213,10 @@ export async function generateLiveCoaching(
  * Returns safe fallback on any error - never throws
  */
 export async function generatePostCallSummary(
-  transcripts: TranscriptTurn[]
+  transcripts: TranscriptTurn[],
+  callId?: string
 ): Promise<PostCallSummary> {
-  console.log('[Summary Client] Starting summary generation...', { transcriptCount: transcripts?.length });
+  console.log('[Summary Client] Starting summary generation...', { transcriptCount: transcripts?.length, callId });
 
   const safeTranscripts = Array.isArray(transcripts) ? transcripts : [];
   console.log('[Summary Client] Normalized transcripts:', safeTranscripts.length);
@@ -243,6 +244,7 @@ export async function generatePostCallSummary(
       },
       body: JSON.stringify({
         transcripts: safeTranscripts,
+        callId
       }),
       signal: controller.signal
     });

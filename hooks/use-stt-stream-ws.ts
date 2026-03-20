@@ -24,7 +24,7 @@ export interface UseSTTStreamReturn {
   isSpeaking: boolean
   transcriptCount: number
   sessionId: string
-  startStream: (speaker: 'salesperson' | 'prospect', stream?: MediaStream, diarize?: boolean) => Promise<void>
+  startStream: (speaker: 'salesperson' | 'prospect', stream?: MediaStream, diarize?: boolean, externalSessionId?: string) => Promise<void>
   stopStream: (keepTracks?: boolean, forceKillContext?: boolean) => Promise<void>
   startAutomatic: (speakerOverride?: 'salesperson' | 'prospect') => Promise<void>
   error: string | null
@@ -197,7 +197,7 @@ export function useSTTStream(
   }, [_wssBaseUrl])
 
 
-  const startStream = useCallback(async (speaker: 'salesperson' | 'prospect', audioStream?: MediaStream, diarize = false) => {
+  const startStream = useCallback(async (speaker: 'salesperson' | 'prospect', audioStream?: MediaStream, diarize = false, externalSessionId?: string) => {
     if (startInProgressRef.current) {
       console.warn(`[WS STT ${speaker}] startStream ignored - already in progress`)
       return
@@ -212,8 +212,8 @@ export function useSTTStream(
       speakerRef.current = speaker
       isDiarizedRef.current = diarize
 
-      // Generate session ID
-      const newSessionId = `${speaker}-${Date.now()}-${Math.random().toString(36).substring(2, 8)}`
+      // Generate session ID or use external one
+      const newSessionId = externalSessionId || `${speaker}-${Date.now()}-${Math.random().toString(36).substring(2, 8)}`
       sessionIdRef.current = newSessionId
       transcriptCountRef.current = 0
       bytesSentRef.current = 0
