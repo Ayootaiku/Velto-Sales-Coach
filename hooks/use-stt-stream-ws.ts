@@ -24,6 +24,8 @@ export interface UseSTTStreamReturn {
   isSpeaking: boolean
   transcriptCount: number
   sessionId: string
+  isInputEnabled: boolean
+  setIsInputEnabled: (enabled: boolean) => void
   startStream: (speaker: 'salesperson' | 'prospect', stream?: MediaStream, diarize?: boolean, externalSessionId?: string) => Promise<void>
   stopStream: (keepTracks?: boolean, forceKillContext?: boolean) => Promise<void>
   startAutomatic: (speakerOverride?: 'salesperson' | 'prospect') => Promise<void>
@@ -50,6 +52,7 @@ export function useSTTStream(
   const [isSpeaking, setIsSpeaking] = useState(false)
   const [transcriptCount, setTranscriptCount] = useState(0)
   const [error, setError] = useState<string | null>(null)
+  const [isInputEnabled, setIsInputEnabled] = useState(true)
 
   const sessionIdRef = useRef<string>('')
   const wsRef = useRef<WebSocket | null>(null)
@@ -84,6 +87,7 @@ export function useSTTStream(
   const startInProgressRef = useRef(false)
   const watchdogEnabledRef = useRef(false)
   const externalSessionIdRef = useRef<string | null>(null)
+  const isInputEnabledRef = useRef(true)
 
   // DEDUPLICATION: Track server-finalized text to prevent double finalization
   const serverFinalizedTextRef = useRef<string>('')
@@ -97,6 +101,10 @@ export function useSTTStream(
   useEffect(() => {
     onSpeakerTurnRef.current = onSpeakerTurn
   }, [onSpeakerTurn])
+
+  useEffect(() => {
+    isInputEnabledRef.current = isInputEnabled
+  }, [isInputEnabled])
 
   const MAX_RECONNECT_ATTEMPTS = 999999 // Effectively infinite — never give up until user stops session
   const MAX_RECONNECT_DELAY_MS = 2000 // Cap delay so recovery stays quick (was 1s, 2s, 3s... forever)
@@ -477,6 +485,9 @@ export function useSTTStream(
         if (avgRMS > 0.0001) {
           lastActiveTimeRef.current = now
         }
+        
+        // SKIP sending if input is disabled (manual speaker switching in In-Room mode)
+        if (!isInputEnabledRef.current) return
 
         // Do NOT restart on silence (4s/8s zero RMS) — keeps connection up so prospectStream.isConnected stays true; only no-audio 15s and connection-health 20s trigger restart.
 
@@ -736,6 +747,8 @@ export function useSTTStream(
     isSpeaking,
     transcriptCount,
     sessionId: sessionIdRef.current,
+    isInputEnabled,
+    setIsInputEnabled,
     startStream,
     stopStream,
     error,

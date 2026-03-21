@@ -1049,15 +1049,22 @@ export function SalesCoachOverlay() {
     return () => clearInterval(interval)
   }, [status, isDiarized, manualSpeaker, addLog])
 
-  // SPEAKER SWITCH WATCHDOG: Automatically reset hardware when switching Speakers
-  // This ensures the WebSocket connects with the NEW speaker tag immediately
+  // SPEAKER SWITCH WATCHDOG: Update active stream instead of restarting hardware
   useEffect(() => {
     if (status === "listening" && isDiarized) {
       addLog(`⚡ SYSTEM: SPEAKER SWITCH -> ${manualSpeaker.toUpperCase()}`)
       console.log(`[IN-ROOM] 🔄 Switching speaker to ${manualSpeaker}...`)
-      salespersonStream.startAutomatic(manualSpeaker)
+      
+      // Update local stream enabled states without dropping WebSockets
+      if (manualSpeaker === 'salesperson') {
+        salespersonStream.setIsInputEnabled(true)
+        prospectStream.setIsInputEnabled(false)
+      } else {
+        salespersonStream.setIsInputEnabled(false)
+        prospectStream.setIsInputEnabled(true)
+      }
     }
-  }, [manualSpeaker, isDiarized, status, salespersonStream.startAutomatic, addLog])
+  }, [manualSpeaker, isDiarized, status, salespersonStream.setIsInputEnabled, prospectStream.setIsInputEnabled, addLog])
 
   const handleStartCoaching = useCallback(async (mode: 'dual' | 'diarized' = 'dual') => {
     // Generate a unique call ID for this entire session
@@ -1095,13 +1102,21 @@ export function SalesCoachOverlay() {
       const requestMic = (): Promise<MediaStream> => navigator.mediaDevices.getUserMedia(audioConstraints)
       requestMic()
         .then((micStreamForDiarized: MediaStream) => {
-          addLog("🚀 INITIALIZING IN-ROOM CAPTURE (Diarization V1.2)...")
+          addLog("🚀 INITIALIZING IN-ROOM CAPTURE (Manual Switch mode)...")
           updateTrace({ A: true, turnId: 0 })
-          salespersonStream.startStream('salesperson', micStreamForDiarized, true, callId).then(() => {
-            addLog("✅ WEBSOCKET CONNECTED - Port 3002")
-            addLog("🎙️ CAPTURE ACTIVE: Use the buttons to switch speakers.")
+          
+          // Start BOTH streams on the same mic
+          // Note: we use diarize=false because we're doing manual labeling via buttons
+          const p1 = salespersonStream.startStream('salesperson', micStreamForDiarized, false, callId)
+          const p2 = prospectStream.startStream('prospect', micStreamForDiarized, false, callId)
+          
+          Promise.all([p1, p2]).then(() => {
+            addLog("✅ BOTH STREAMS CONNECTED - Ready for manual coaching.")
+            // Set initial enabled state based on default manual speaker (salesperson)
+            salespersonStream.setIsInputEnabled(true)
+            prospectStream.setIsInputEnabled(false)
           }).catch((e: any) => {
-            addLog(`❌ Diarization failed: ${e?.message || e}`)
+            addLog(`❌ In-Room initialization failed: ${e?.message || e}`)
             micStreamForDiarized.getTracks().forEach((t) => t.stop())
             setStatus("ready")
           })
@@ -1517,7 +1532,20 @@ export function SalesCoachOverlay() {
             {isDiarized && (
               <div className="flex gap-2 bg-[#27272a] p-1.5 rounded-2xl border border-[#3f3f46]">
                 <button
-                  onClick={() => setManualSpeaker('salesperson')}
+                  onClick={() => {
+                    // Manual finalization: If switching AWAY from prospect, trigger coaching on current draft
+                    if (manualSpeaker === 'prospect' && (prospectStream.lastPartial || prospectStream.lastFinal)) {
+                      addLog("⚡ MANUAL TRIGGER: Finishing prospect turn...")
+                      const textToProcess = prospectStream.lastPartial?.text || prospectStream.lastFinal?.text || ""
+                      if (textToProcess.length > 5) {
+                        // Mark as processed so the automatic callback doesn't trigger again
+                        lastProcessedTranscriptRef.current = textToProcess
+                        lastProcessedTimeRef.current = Date.now()
+                        handleTranscript(textToProcess, 'prospect')
+                      }
+                    }
+                    setManualSpeaker('salesperson')
+                  }}
                   className={cn(
                     "flex-1 py-3 rounded-xl font-bold text-[12px] tracking-wide transition-all duration-300 relative overflow-hidden group",
                     manualSpeaker === 'salesperson'
