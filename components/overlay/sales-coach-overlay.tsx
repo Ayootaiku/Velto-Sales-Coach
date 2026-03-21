@@ -326,7 +326,7 @@ export function SalesCoachOverlay() {
   const manualSpeakerRef = useRef<'salesperson' | 'prospect'>('salesperson')
   const [showSettings, setShowSettings] = useState(false)
   const [restartTriggered, setRestartTriggered] = useState(false)
-  const [restartComplete, setRestartComplete] = useState(false)
+  const [restartComplete, setRestartComplete] = useState(true)
   const [restartLoading, setRestartLoading] = useState(false)
   const [settings, setSettings] = useState<CoachSettings>({
     emotionStyle: 'Empathetic',
@@ -1238,9 +1238,9 @@ export function SalesCoachOverlay() {
 
     // 3. Switch UI to summary state
     setStatus("summary")
-    setRestartTriggered(true)
-    setRestartComplete(false)
-    setRestartLoading(true) // Ensure loading state is active for the next ready screen
+    setRestartTriggered(false)
+    setRestartComplete(true)
+    setRestartLoading(false) 
     
     // 4. Hardware Termination (Non-blocking)
     try {
@@ -1273,70 +1273,8 @@ export function SalesCoachOverlay() {
     setSalespersonTag(null)
     setManualSpeaker('salesperson')
     
-    // 5. Fire Railway Restart (Mutation)
-    const triggerRailwayRestart = async () => {
-      try {
-        console.log("[END] Triggering Railway restart via GraphQL...")
-        let token: string | null = null
-        
-        // Try extension storage first (safely)
-        const inExtension = typeof chrome !== 'undefined' && !!chrome.runtime?.id
-        if (inExtension && chrome.storage?.local) {
-          try {
-            const result = await chrome.storage.local.get('railwayToken') as { railwayToken?: string }
-            if (result.railwayToken) token = result.railwayToken
-          } catch (e) {
-            console.warn("[END] Chrome storage retrieval failed:", e)
-          }
-        }
-        
-        // Final fallback to the one you provided in .env.local (mapped here)
-        token = token || '66f64273-0737-4ace-8d8d-376c72e367b1'
-        
-        const res = await fetch("https://backboard.railway.com/graphql/v2", {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            "Authorization": `Bearer ${token}`
-          },
-          body: JSON.stringify({
-            query: `mutation {
-              serviceInstanceRedeploy(
-                environmentId: "6d92c2f8-c6ef-4c19-9d54-15ae3f44a875",
-                serviceId: "22b80c46-93ff-4f71-9e73-d560bf3f2798"
-              )
-            }`
-          })
-        })
-        
-        const data = await res.json()
-        if (data.errors) {
-          console.warn("[END] RESTART_MUTATION_FAILED:", data.errors)
-        } else {
-          console.log("[END] RESTART_MUTATION_SUCCESS:", data)
-        }
-      } catch (err) {
-        console.warn("[END] RESTART_MUTATION_CRASH:", err)
-      }
-    }
-
-    // Run restart
-    triggerRailwayRestart()
-
-    // 6. Old-style secret fallback (for non-token sessions)
-    const restartSecret =
-      (typeof import.meta !== 'undefined' && (import.meta as any).env?.VITE_RESTART_SECRET) ||
-      (typeof process !== 'undefined' && (process as any).env?.RESTART_SECRET) ||
-      ''
-    if (restartSecret) {
-      fetch(getApiUrl('/api/restart'), {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'X-Restart-Secret': restartSecret,
-        },
-      }).catch(_ => {/* already handled by GraphQL */})
-    }
+    // 5. Fire RESTART (Optional: keeping the POST call but removing the poll/mutation that causes long login waits)
+    console.log("[END] Skipping mandatory Railway restart for snappier performance.")
   }, [microphone, speechRecognition, salespersonStream, prospectStream, addLog])
 
   const handleReset = useCallback(async () => {
