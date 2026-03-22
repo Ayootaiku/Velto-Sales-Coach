@@ -631,7 +631,6 @@ export function SalesCoachOverlay() {
     // Track timeout to clear it if API responds successfully
     let timeoutId: ReturnType<typeof setTimeout> | null = null
     let hasCompleted = false
-    const streamingCardId = `stream-${Date.now()}`
 
     try {
       // Call AI with STREAMING support for faster perceived response
