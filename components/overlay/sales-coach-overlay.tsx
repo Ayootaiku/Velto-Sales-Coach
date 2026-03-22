@@ -771,13 +771,6 @@ export function SalesCoachOverlay() {
     if (speaker === 'prospect') {
       addLog(`⚡ TRIGGERING AI COACHING for prospect speech`)
       runCoaching([...transcriptTurnsRef.current], speaker)
-      
-      // AUTO-SWITCH: Once a prospect turn is finalized (by watchdog or STT), 
-      // automatically switch back to 'You' so the coach is ready and the UI updates.
-      if (isDiarized) {
-        addLog(`🔄 AUTO-SWITCH: Returning to Salesperson mode`)
-        setManualSpeaker('salesperson')
-      }
     } else {
       addLog(`ℹ️ Salesperson speech stored. Coaching skipped.`)
     }
