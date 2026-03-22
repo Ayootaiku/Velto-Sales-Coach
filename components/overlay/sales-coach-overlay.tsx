@@ -396,6 +396,7 @@ export function SalesCoachOverlay() {
 
   // DEDUPLICATION: Track last processed transcript to prevent duplicate callbacks
   const lastProcessedTranscriptRef = useRef<string>('')
+  const lastProcessedProspectTranscriptRef = useRef<string>('')
   const lastProcessedTimeRef = useRef<number>(0)
   const DEDUP_WINDOW_MS = 2000 // 2 second deduplication window
   const MIN_PARTIAL_CHARS_FOR_DRAFT = 8
@@ -751,6 +752,10 @@ export function SalesCoachOverlay() {
 
     lastProcessedTranscriptRef.current = text
     lastProcessedTimeRef.current = now
+
+    if (speaker === 'prospect') {
+      lastProcessedProspectTranscriptRef.current = text
+    }
 
     addLog(`🎯 handleTranscript: speaker=${speaker}, textLen=${text.length}`)
 
@@ -1527,8 +1532,12 @@ export function SalesCoachOverlay() {
                     if (manualSpeaker === 'prospect' && (prospectStream.lastPartial || prospectStream.lastFinal)) {
                       addLog("⚡ MANUAL TRIGGER: Finishing prospect turn...")
                       const textToProcess = prospectStream.lastPartial?.text || prospectStream.lastFinal?.text || ""
-                      if (textToProcess.length > 5) {
+                      
+                      // DEDUPLICATION: Don't re-process if we already handled this exact text
+                      if (textToProcess.length > 5 && textToProcess !== lastProcessedProspectTranscriptRef.current) {
                         handleTranscript(textToProcess, 'prospect')
+                      } else {
+                        addLog("⏭️ Skipping manual trigger: Text already processed")
                       }
                     }
                     setManualSpeaker('salesperson')
