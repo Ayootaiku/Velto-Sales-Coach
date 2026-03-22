@@ -92,10 +92,8 @@ export async function POST(request: Request) {
   }
 
   const mutation = `
-    mutation($id: String!) {
-      deploymentRedeploy(id: $id) {
-        id
-      }
+    mutation($serviceId: String!, $environmentId: String!) {
+      serviceInstanceRedeploy(serviceId: $serviceId, environmentId: $environmentId)
     }
   `;
   const restartRes = await fetch(RAILWAY_GRAPHQL, {
@@ -106,7 +104,7 @@ export async function POST(request: Request) {
     },
     body: JSON.stringify({
       query: mutation,
-      variables: { id: deploymentId },
+      variables: { serviceId, environmentId },
     }),
   });
 
