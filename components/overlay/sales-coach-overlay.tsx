@@ -1424,7 +1424,11 @@ export function SalesCoachOverlay() {
     const inExtension = typeof chrome !== 'undefined' && !!chrome.runtime?.id
     if (mode === 'diarized' && inExtension) {
       const websiteUrl = 'https://velto-sales-coach-production.up.railway.app'
-      window.open(`${websiteUrl}?start=inroom`, '_blank')
+      if (chrome.tabs) {
+        chrome.tabs.create({ url: `${websiteUrl}?start=inroom` })
+      } else {
+        window.open(`${websiteUrl}?start=inroom`, '_blank')
+      }
       return
     }
     handleStartCoaching(mode)

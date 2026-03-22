@@ -53,6 +53,7 @@ export default defineConfig(({ mode }) => {
     },
     define: {
       'process.env.NODE_ENV': JSON.stringify('production'),
+      'process.env.NEXT_PUBLIC_RESTART_SECRET': JSON.stringify(env.NEXT_PUBLIC_RESTART_SECRET || env.VITE_RESTART_SECRET || ''),
       'process.env': '{}',
       'import.meta.env.VITE_RAILWAY_WSS': JSON.stringify('wss://velto-sales-coach-production.up.railway.app'),
       'import.meta.env.VITE_RESTART_SECRET': JSON.stringify(env.VITE_RESTART_SECRET || ''),

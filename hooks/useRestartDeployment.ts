@@ -6,7 +6,10 @@ export function useRestartDeployment() {
   const restartDeployment = async () => {
     setIsRestarting(true);
     try {
-      const res = await fetch("/api/restart", {
+      const isExtension = typeof chrome !== "undefined" && !!chrome.runtime?.id;
+      const baseUrl = isExtension ? "https://velto-sales-coach-production.up.railway.app" : "";
+
+      const res = await fetch(`${baseUrl}/api/restart`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
