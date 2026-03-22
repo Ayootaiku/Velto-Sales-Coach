@@ -1,16 +1,17 @@
 import React, { useEffect, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import { STORAGE_KEYS, DEFAULTS } from './storage-keys';
+import './extension.css';
 
 function OptionsApp() {
-  const [showMovableOrb, setShowMovableOrb] = useState(DEFAULTS[STORAGE_KEYS.SHOW_MOVABLE_ORB]);
-  const [useFloatingWindow, setUseFloatingWindow] = useState(DEFAULTS[STORAGE_KEYS.USE_FLOATING_WINDOW]);
+  const [showMovableOrb, setShowMovableOrb] = useState<boolean>(DEFAULTS[STORAGE_KEYS.SHOW_MOVABLE_ORB]);
+  const [useFloatingWindow, setUseFloatingWindow] = useState<boolean>(DEFAULTS[STORAGE_KEYS.USE_FLOATING_WINDOW]);
   const [loaded, setLoaded] = useState(false);
 
   useEffect(() => {
     chrome.storage.local.get([STORAGE_KEYS.SHOW_MOVABLE_ORB, STORAGE_KEYS.USE_FLOATING_WINDOW], (result) => {
-      if (result[STORAGE_KEYS.SHOW_MOVABLE_ORB] !== undefined) setShowMovableOrb(result[STORAGE_KEYS.SHOW_MOVABLE_ORB]);
-      if (result[STORAGE_KEYS.USE_FLOATING_WINDOW] !== undefined) setUseFloatingWindow(result[STORAGE_KEYS.USE_FLOATING_WINDOW]);
+      if (result[STORAGE_KEYS.SHOW_MOVABLE_ORB] !== undefined) setShowMovableOrb(Boolean(result[STORAGE_KEYS.SHOW_MOVABLE_ORB]));
+      if (result[STORAGE_KEYS.USE_FLOATING_WINDOW] !== undefined) setUseFloatingWindow(Boolean(result[STORAGE_KEYS.USE_FLOATING_WINDOW]));
       setLoaded(true);
     });
   }, []);

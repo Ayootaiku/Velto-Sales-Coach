@@ -1,0 +1,28 @@
+html, body, #root {
+  margin: 0;
+  padding: 0;
+  width: 100%;
+  background: #0a0a0a;
+  font-family: system-ui, -apple-system, sans-serif;
+}
+
+/* Popup specific styles */
+body.popup, body.popup #root {
+  min-height: 100%;
+  max-width: 380px;
+  max-height: 600px;
+  overflow: auto;
+}
+
+/* Sidepanel specific styles */
+body.sidepanel, body.sidepanel #root {
+  height: 100%;
+  overflow: hidden;
+}
+
+/* Options specific styles */
+body.options, body.options #root {
+  min-height: 100%;
+  background: #0a0a0a;
+  color: #fafafa;
+}

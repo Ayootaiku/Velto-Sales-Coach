@@ -5,6 +5,7 @@ import { setApiBaseUrl } from '@/lib/salescoach-ai';
 import { setWssBaseUrl } from '@/hooks/use-stt-stream-ws';
 import { API_BASE_URL, WSS_URL } from './config';
 import '@/app/globals.css';
+import './extension.css';
 
 setApiBaseUrl(API_BASE_URL);
 setWssBaseUrl(WSS_URL);
