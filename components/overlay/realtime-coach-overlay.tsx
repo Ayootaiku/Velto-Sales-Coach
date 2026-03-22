@@ -47,11 +47,16 @@ export function RealtimeCoachOverlay() {
     lastAudioTimeRef.current = Date.now();
     setProspectAudioLevel(80);
     setHasProspectActivity(true);
-    setIsProcessingAI(true);
     
-    // Process EVERY prospect transcript continuously
+    // Process prospect speech immediately as interim to get fast response
+    const draft = processInterimTranscript(transcript.text, 'prospect');
+    if (draft && draft.confidence > 40) {
+      setCoaching(draft);
+      setIsDraft(true);
+    }
+    
+    // Also process as final for debounced/refined response
     processFinalTranscript(transcript.text, 'prospect', async (finalCoaching) => {
-      setIsProcessingAI(false);
       setHasProspectActivity(false);
       if (finalCoaching) {
         setCoaching(finalCoaching);
