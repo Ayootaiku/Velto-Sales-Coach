@@ -619,6 +619,15 @@ export function SalesCoachOverlay() {
     addLog(`[Trace] Step C: Coach Request Started (Turn: ${nextTurnId}, Session: ${prospectStream.sessionId})`)
     updateTrace({ C: true, turnId: nextTurnId })
 
+    // IMMEDIATE FEEDBACK: Show a strategizing card so the user knows coaching is coming
+    const streamingCardId = `stream-${Date.now()}`
+    setCards([{
+      id: streamingCardId,
+      suggestion: "Strategizing...",
+      reason: "Analyzing the prospect's last statement for the best response...",
+      type: 'reframe'
+    }]);
+
     // Track timeout to clear it if API responds successfully
     let timeoutId: ReturnType<typeof setTimeout> | null = null
     let hasCompleted = false
@@ -742,7 +751,21 @@ export function SalesCoachOverlay() {
       return
     }
 
-    addLog(`🎯 handleTranscript called: speaker=${speaker}, textLen=${text.length}`)
+    // DEDUPLICATION: Avoid processing the same text twice (e.g. from Silence Watchdog + STT Final)
+    const now = Date.now()
+    const isDuplicate = 
+      text === lastProcessedTranscriptRef.current && 
+      (now - lastProcessedTimeRef.current) < DEDUP_WINDOW_MS
+    
+    if (isDuplicate) {
+      console.log(`[handleTranscript] ⏭️ Skipping duplicate: "${text.substring(0, 30)}..."`)
+      return
+    }
+
+    lastProcessedTranscriptRef.current = text
+    lastProcessedTimeRef.current = now
+
+    addLog(`🎯 handleTranscript: speaker=${speaker}, textLen=${text.length}`)
 
     const turn: TranscriptTurn = { speaker, text, timestamp: new Date().toISOString() }
     transcriptTurnsRef.current.push(turn)
@@ -1476,19 +1499,16 @@ export function SalesCoachOverlay() {
                       addLog("⚡ MANUAL TRIGGER: Finishing prospect turn...")
                       const textToProcess = prospectStream.lastPartial?.text || prospectStream.lastFinal?.text || ""
                       if (textToProcess.length > 5) {
-                        // Mark as processed so the automatic callback doesn't trigger again
-                        lastProcessedTranscriptRef.current = textToProcess
-                        lastProcessedTimeRef.current = Date.now()
                         handleTranscript(textToProcess, 'prospect')
                       }
                     }
                     setManualSpeaker('salesperson')
                   }}
                   className={cn(
-                    "flex-1 py-3 rounded-xl font-bold text-[12px] tracking-wide transition-all duration-300 relative overflow-hidden group",
+                    "flex-1 py-3 rounded-xl font-bold text-[12px] tracking-wide transition-all duration-300 relative overflow-hidden group border",
                     manualSpeaker === 'salesperson'
-                      ? "bg-[#d4ff32] text-[#000000] shadow-sm"
-                      : "bg-transparent text-[#71717a] hover:text-[#ffffff]"
+                      ? "bg-[#fafafa] text-[#000000] border-[#fafafa] shadow-sm"
+                      : "bg-transparent text-[#71717a] border-transparent hover:text-[#ffffff] hover:bg-[#2c2c2e]"
                   )}
                 >
                   <div className="flex items-center justify-center gap-2">
@@ -1499,15 +1519,15 @@ export function SalesCoachOverlay() {
                 <button
                   onClick={() => setManualSpeaker('prospect')}
                   className={cn(
-                    "flex-1 py-3 rounded-xl font-bold text-[12px] tracking-wide transition-all duration-300 relative overflow-hidden group",
+                    "flex-1 py-3 rounded-xl font-bold text-[12px] tracking-wide transition-all duration-300 relative overflow-hidden group border",
                     manualSpeaker === 'prospect'
-                      ? "bg-[#27272a] text-[#ffffff] shadow-sm"
-                      : "bg-transparent text-[#71717a] hover:text-[#ffffff]"
+                      ? "bg-[#d4ff32] text-[#000000] border-[#d4ff32] shadow-sm"
+                      : "bg-transparent text-[#71717a] border-transparent hover:text-[#ffffff] hover:bg-[#2c2c2e]"
                   )}
                 >
                   <div className="flex items-center justify-center gap-2">
-                    <div className={cn("w-4 h-4 flex items-center justify-center rounded-full border-2 transition-colors", manualSpeaker === 'prospect' ? "border-[#d4ff32]" : "border-[#71717a]")}>
-                      <div className={cn("w-1.5 h-1.5 rounded-full", manualSpeaker === 'prospect' ? "bg-[#d4ff32]" : "bg-transparent")} />
+                    <div className={cn("w-4 h-4 flex items-center justify-center rounded-full border-2 transition-colors", manualSpeaker === 'prospect' ? "border-[#000000]" : "border-[#71717a]")}>
+                      <div className={cn("w-1.5 h-1.5 rounded-full", manualSpeaker === 'prospect' ? "bg-[#000000]" : "bg-transparent")} />
                     </div>
                     <span>Prospect</span>
                   </div>
