@@ -483,21 +483,6 @@ export function SalesCoachOverlay() {
   const prospectStream = useSTTStream((transcript) => {
     // Regular dual-stream mode AND Diarized mode use this callback for the prospect stream
 
-    // DEDUPLICATION CHECK: Skip if same transcript within dedup window
-    const now = Date.now()
-    const isDuplicate =
-      transcript.text === lastProcessedTranscriptRef.current &&
-      now - lastProcessedTimeRef.current < DEDUP_WINDOW_MS
-
-    if (isDuplicate) {
-      console.log(`[Prospect onSpeechEnd] ⏭️ SKIPPING duplicate transcript (within ${DEDUP_WINDOW_MS}ms window)`)
-      return
-    }
-
-    // Update deduplication tracking
-    lastProcessedTranscriptRef.current = transcript.text
-    lastProcessedTimeRef.current = now
-
     console.log(`[Prospect onSpeechEnd] handleTranscriptRef exists:`, !!handleTranscriptRef.current)
     // Trigger coaching when prospect speech ends
     if (handleTranscriptRef.current) {
