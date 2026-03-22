@@ -35,6 +35,7 @@ import { Slider } from "@/components/ui/slider"
 import { generateLiveCoaching, generatePostCallSummary, getApiUrl, type TranscriptTurn } from "@/lib/salescoach-ai"
 import { processTranscriptUltraFast, type TranscriptTurn as CopilotTurn } from "@/lib/salescoach-copilot"
 import { createTurnManager } from "@/lib/turn-manager"
+import { useRestartDeployment } from "@/hooks/useRestartDeployment"
 
 export interface CoachSettings {
   emotionStyle: 'Assertive' | 'Empathetic' | 'Energetic';
@@ -338,6 +339,8 @@ export function SalesCoachOverlay() {
     keyDifferentiators: '',
     objectionMode: 'Soft Reframe'
   })
+
+  const { restartDeployment, isRestarting } = useRestartDeployment()
 
   // Load settings on mount
   useEffect(() => {
@@ -1374,6 +1377,8 @@ export function SalesCoachOverlay() {
 
   const tryStartSession = useCallback(
     async (mode: 'dual' | 'diarized') => {
+      await restartDeployment(); // 🔄 restarts every time
+      
       // If a restart is strictly required and still in progress, we POLL until healthy.
       // This is necessary because startStream will fail immediately if Railway isn't up.
       if (restartTriggered && !restartComplete) {
@@ -1405,7 +1410,7 @@ export function SalesCoachOverlay() {
       }
       handleStartCoaching(mode)
     },
-    [restartTriggered, restartComplete, handleStartCoaching]
+    [restartTriggered, restartComplete, handleStartCoaching, restartDeployment]
   )
 
   const formatTime = (s: number) => {
@@ -1465,16 +1470,18 @@ export function SalesCoachOverlay() {
                 <button
                   type="button"
                   onClick={() => tryStartSession('dual')}
-                  className="w-full py-3.5 rounded-xl bg-[#d4ff32] hover:bg-[#e0ff66] text-[#000000] text-[13px] font-bold tracking-wide transition-all shadow-lg shadow-[#d4ff32]/10"
+                  disabled={isRestarting}
+                  className="w-full py-3.5 rounded-xl bg-[#d4ff32] hover:bg-[#e0ff66] text-[#000000] text-[13px] font-bold tracking-wide transition-all shadow-lg shadow-[#d4ff32]/10 disabled:opacity-50 disabled:cursor-not-allowed"
                 >
-                  Start Session
+                  {isRestarting ? "Starting..." : "Start Session"}
                 </button>
                 <button
                   type="button"
                   onClick={() => tryStartSession('diarized')}
-                  className="w-full py-3.5 rounded-xl bg-transparent border border-[#3f3f46] hover:bg-[#2c2c2e] text-[#ffffff] text-[13px] font-bold tracking-wide transition-all"
+                  disabled={isRestarting}
+                  className="w-full py-3.5 rounded-xl bg-transparent border border-[#3f3f46] hover:bg-[#2c2c2e] text-[#ffffff] text-[13px] font-bold tracking-wide transition-all disabled:opacity-50 disabled:cursor-not-allowed"
                 >
-                  In-Room Mode
+                  {isRestarting ? "Loading..." : "In-Room Mode"}
                 </button>
               </div>
             </div>
