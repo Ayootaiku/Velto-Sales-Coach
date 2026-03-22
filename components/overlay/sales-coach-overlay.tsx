@@ -776,18 +776,18 @@ export function SalesCoachOverlay() {
       : prospectStream
     const activePartial = activeStream.lastPartial
 
-    // Only trigger if we definitely aren't speaking anymore
-    if (!activeStream.isSpeaking && activePartial && !isCoachingInProgressRef.current) {
-      // Heuristic: If manual speaker is prospect, or we are in dual stream mode
-      const likelyProspect = !isDiarized || manualSpeaker === 'prospect'
-      if (!likelyProspect) return
+    const likelyProspect = !isDiarized || manualSpeaker === 'prospect'
+    if (!likelyProspect || !activePartial || !activePartial.text || isCoachingInProgressRef.current) return
 
-      const timer = setTimeout(() => {
-        addLog(`⏱️ SILENCE WATCHDOG: Triggering coaching for non-final transcript`)
-        handleTranscript(activePartial.text, 'prospect')
-      }, 400)
-      return () => clearTimeout(timer)
-    }
+    // Trigger fast if RMS detects silence, or a bit slower if STT text is just stagnant (noise overriding silence)
+    const delay = !activeStream.isSpeaking ? 400 : 1500
+
+    const timer = setTimeout(() => {
+      addLog(`⏱️ WATCHDOG: Triggering AI response for prospect (${delay}ms) delay`)
+      handleTranscript(activePartial.text, 'prospect')
+    }, delay)
+
+    return () => clearTimeout(timer)
   }, [prospectStream.isSpeaking, prospectStream.lastPartial, salespersonStream.isSpeaking, salespersonStream.lastPartial, isDiarized, manualSpeaker, handleTranscript, addLog])
 
 
@@ -1248,7 +1248,7 @@ export function SalesCoachOverlay() {
     setStatus("summary")
     setRestartTriggered(false)
     setRestartComplete(true)
-    setRestartLoading(false) 
+    setRestartLoading(false)
     
     // 4. Hardware Termination (Non-blocking)
     try {
@@ -1281,8 +1281,24 @@ export function SalesCoachOverlay() {
     setSalespersonTag(null)
     setManualSpeaker('salesperson')
     
-    // 5. Fire RESTART (Optional: keeping the POST call but removing the poll/mutation that causes long login waits)
-    console.log("[END] Skipping mandatory Railway restart for snappier performance.")
+    // 6. Fire RESTART
+    try {
+      console.log('[Coach] Triggering Railway deployment restart...');
+      const response = await fetch('/api/restart', {
+        method: 'POST',
+        headers: {
+          'X-Restart-Secret': process.env.NEXT_PUBLIC_RESTART_SECRET || 'velto-restart-secret-2024'
+        }
+      });
+      const data = await response.json();
+      if (data.triggered) {
+        console.log('[Coach] Railway deployment restart triggered successfully');
+      } else {
+        console.error('[Coach] Failed to trigger Railway deployment restart:', data.error || data.reason);
+      }
+    } catch (error) {
+      console.error('[Coach] Error triggering Railway deployment restart:', error);
+    }
   }, [microphone, speechRecognition, salespersonStream, prospectStream, addLog])
 
   const handleReset = useCallback(async () => {
