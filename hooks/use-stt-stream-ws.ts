@@ -35,7 +35,7 @@ export interface UseSTTStreamReturn {
 
 const SILENCE_THRESHOLD_MS = 200
 const FINAL_SILENCE_THRESHOLD_MS = 800
-const RMS_THRESHOLD = 0.01 // Minimum RMS to consider as real audio
+const RMS_THRESHOLD = 0.005 // Minimum RMS to consider as real audio
 
 type PCMBuffer = Int16Array;
 

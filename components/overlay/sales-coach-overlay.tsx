@@ -772,10 +772,17 @@ export function SalesCoachOverlay() {
     if (speaker === 'prospect') {
       addLog(`⚡ TRIGGERING AI COACHING for prospect speech`)
       runCoaching([...transcriptTurnsRef.current], speaker)
+      
+      // AUTO-SWITCH: Once a prospect turn is finalized (by watchdog or STT), 
+      // automatically switch back to 'You' so the coach is ready and the UI updates.
+      if (isDiarized) {
+        addLog(`🔄 AUTO-SWITCH: Returning to Salesperson mode`)
+        setManualSpeaker('salesperson')
+      }
     } else {
       addLog(`ℹ️ Salesperson speech stored. Coaching skipped.`)
     }
-  }, [runCoaching, addLog])
+  }, [runCoaching, addLog, isDiarized])
 
   // Set up ref for callback access
   useEffect(() => {
@@ -785,10 +792,12 @@ export function SalesCoachOverlay() {
   // PROGRESSIVE COACHING: Trigger after 1.2s of silence even if no 'final' from STT
   // This fixes the "no-response" bug when STT doesn't finalize
   useEffect(() => {
-    // In diarized mode, we look at the salesperson stream (which captures everyone)
+    // In diarized mode, we look at the stream corresponding to the current manual selector
     // Otherwise, we look at the prospect stream
-    const activeStream = isDiarized ? salespersonStream : prospectStream
-    const activePartial = isDiarized ? salespersonStream.lastPartial : prospectStream.lastPartial
+    const activeStream = isDiarized 
+      ? (manualSpeaker === 'prospect' ? prospectStream : salespersonStream) 
+      : prospectStream
+    const activePartial = activeStream.lastPartial
 
     // Only trigger if we definitely aren't speaking anymore
     if (!activeStream.isSpeaking && activePartial && !isCoachingInProgressRef.current) {
