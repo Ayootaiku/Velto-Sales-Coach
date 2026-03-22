@@ -36,6 +36,7 @@ import { generateLiveCoaching, generatePostCallSummary, getApiUrl, type Transcri
 import { processTranscriptUltraFast, type TranscriptTurn as CopilotTurn } from "@/lib/salescoach-copilot"
 import { createTurnManager } from "@/lib/turn-manager"
 import { useRestartDeployment } from "@/hooks/useRestartDeployment"
+import { LoadingOverlay } from "./loading-overlay"
 
 export interface CoachSettings {
   emotionStyle: 'Assertive' | 'Empathetic' | 'Energetic';
@@ -1375,43 +1376,59 @@ export function SalesCoachOverlay() {
     return () => clearInterval(interval)
   }, [status, restartTriggered, restartComplete])
 
+  const [isOverlayLoading, setIsOverlayLoading] = useState(false)
+  const [pendingMode, setPendingMode] = useState<'dual' | 'diarized' | null>(null)
+
   const tryStartSession = useCallback(
     async (mode: 'dual' | 'diarized') => {
-      await restartDeployment(); // 🔄 restarts every time
+      // 1. Fire the restart in the background immediately
+      restartDeployment().catch(e => console.error("Background restart failed:", e));
       
-      // If a restart is strictly required and still in progress, we POLL until healthy.
-      // This is necessary because startStream will fail immediately if Railway isn't up.
-      if (restartTriggered && !restartComplete) {
-        setRestartLoading(true)
-        console.warn("[START] Railway restart in progress - waiting for health check...")
-        let attempts = 0
-        while (attempts < 30) { // Max 60s
-          try {
-            const res = await fetch(getApiUrl('/api/health'))
-            if (res.ok) {
-              setRestartComplete(true)
-              setRestartTriggered(false)
-              setRestartLoading(false)
-              break
-            }
-          } catch (_) {
-            /* ignore */
-          }
-          attempts++
-          await new Promise((r) => setTimeout(r, 2000))
-        }
-      }
-
-      const inExtension = typeof chrome !== 'undefined' && !!chrome.runtime?.id
-      if (mode === 'diarized' && inExtension) {
-        const websiteUrl = 'https://velto-sales-coach-production.up.railway.app'
-        window.open(`${websiteUrl}?start=inroom`, '_blank')
-        return
-      }
-      handleStartCoaching(mode)
+      // 2. Show the 10-second loading overlay
+      setPendingMode(mode)
+      setIsOverlayLoading(true)
     },
-    [restartTriggered, restartComplete, handleStartCoaching, restartDeployment]
+    [restartDeployment]
   )
+
+  const handleOverlayComplete = useCallback(async () => {
+    setIsOverlayLoading(false)
+    if (!pendingMode) return
+
+    const mode = pendingMode
+    setPendingMode(null)
+
+    // If a restart is strictly required and still in progress, we POLL until healthy.
+    // This is necessary because startStream will fail immediately if Railway isn't up.
+    if (restartTriggered && !restartComplete) {
+      setRestartLoading(true)
+      console.warn("[START] Railway restart in progress - waiting for health check...")
+      let attempts = 0
+      while (attempts < 30) { // Max 60s
+        try {
+          const res = await fetch(getApiUrl('/api/health'))
+          if (res.ok) {
+            setRestartComplete(true)
+            setRestartTriggered(false)
+            setRestartLoading(false)
+            break
+          }
+        } catch (_) {
+          /* ignore */
+        }
+        attempts++
+        await new Promise((r) => setTimeout(r, 2000))
+      }
+    }
+
+    const inExtension = typeof chrome !== 'undefined' && !!chrome.runtime?.id
+    if (mode === 'diarized' && inExtension) {
+      const websiteUrl = 'https://velto-sales-coach-production.up.railway.app'
+      window.open(`${websiteUrl}?start=inroom`, '_blank')
+      return
+    }
+    handleStartCoaching(mode)
+  }, [pendingMode, restartTriggered, restartComplete, handleStartCoaching])
 
   const formatTime = (s: number) => {
     const m = Math.floor(s / 60)
@@ -1421,8 +1438,8 @@ export function SalesCoachOverlay() {
 
   if (isCompact) return <CompactOverlay status={status} onExpand={() => setIsCompact(false)} />
 
-  return (
-    <div className="relative bg-[#18181b] border border-[#27272a] shadow-2xl w-[360px] rounded-[1.5rem] overflow-hidden flex flex-col transition-all duration-500">
+  const content = (
+    <div className="relative bg-[#18181b] border border-[#27272a] shadow-2xl w-[360px] rounded-[1.5rem] overflow-hidden flex flex-col transition-all duration-500 h-full">
       {/* Header */}
       <div className="h-14 flex items-center justify-between px-5 bg-[#18181b] shrink-0">
         <div className="flex items-center gap-2.5">
@@ -1612,5 +1629,17 @@ export function SalesCoachOverlay() {
       )}
     </div>
   )
+
+  if (isOverlayLoading) {
+    return (
+      <div className="relative bg-[#18181b] border border-[#27272a] shadow-2xl w-[360px] h-[600px] rounded-[1.5rem] overflow-hidden flex flex-col transition-all duration-500">
+        <LoadingOverlay onComplete={handleOverlayComplete} duration={10000}>
+          {content}
+        </LoadingOverlay>
+      </div>
+    )
+  }
+
+  return content
 }
 
