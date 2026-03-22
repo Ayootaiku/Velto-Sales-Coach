@@ -201,6 +201,25 @@ export function RealtimeCoachOverlay() {
     // Show summary modal (simplified for now)
     setCoaching(null);
     setIsProcessingAI(false);
+
+    // Trigger Railway deployment restart
+    try {
+      console.log('[Coach] Triggering Railway deployment restart...');
+      const response = await fetch('/api/restart', {
+        method: 'POST',
+        headers: {
+          'X-Restart-Secret': process.env.NEXT_PUBLIC_RESTART_SECRET || 'velto-restart-secret-2024'
+        }
+      });
+      const data = await response.json();
+      if (data.triggered) {
+        console.log('[Coach] Railway deployment restart triggered successfully');
+      } else {
+        console.error('[Coach] Failed to trigger Railway deployment restart:', data.error || data.reason);
+      }
+    } catch (error) {
+      console.error('[Coach] Error triggering Railway deployment restart:', error);
+    }
   }, [callId, callTime, microphone, prospectSTT, salespersonSTT]);
 
   // Format time
