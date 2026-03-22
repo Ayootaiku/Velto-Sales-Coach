@@ -11,7 +11,7 @@ export async function POST(req: NextRequest) {
 
     const query = `
       mutation {
-        serviceInstanceRedeploy(
+        serviceRestart(
           serviceId: "${process.env.RAILWAY_SERVICE_ID}"
           environmentId: "${process.env.RAILWAY_ENVIRONMENT_ID}"
         )
