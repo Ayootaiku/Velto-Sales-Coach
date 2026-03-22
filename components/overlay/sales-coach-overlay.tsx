@@ -481,8 +481,7 @@ export function SalesCoachOverlay() {
     }
   })
   const prospectStream = useSTTStream((transcript) => {
-    // Regular dual-stream mode uses this callback
-    if (isDiarized) return // Ignore if we are in diarization mode
+    // Regular dual-stream mode AND Diarized mode use this callback for the prospect stream
 
     // DEDUPLICATION CHECK: Skip if same transcript within dedup window
     const now = Date.now()
