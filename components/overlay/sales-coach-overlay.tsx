@@ -310,7 +310,7 @@ function SettingsPanel({
   )
 }
 
-export function SalesCoachOverlay() {
+export function SalesCoachOverlay({ onInRoomStart }: { onInRoomStart?: () => void }) {
   const [status, setStatus] = useState<CoachingStatus>("ready")
   const [isDiarized, setIsDiarized] = useState(false)
   const [isCompact, setIsCompact] = useState(false)
@@ -1221,18 +1221,6 @@ export function SalesCoachOverlay() {
     }
   }, [salespersonStream, addLog, resetTrace, updateTrace])
 
-  // When opened from extension via ?start=inroom, auto-start In-Room on the website (bypass extension mic limits)
-  useEffect(() => {
-    if (typeof window === 'undefined' || didAutoStartInRoomRef.current) return
-    const inExtension = typeof chrome !== 'undefined' && !!chrome.runtime?.id
-    if (inExtension) return
-    const params = new URLSearchParams(window.location.search)
-    if (params.get('start') !== 'inroom') return
-    didAutoStartInRoomRef.current = true
-    handleStartCoaching('diarized')
-    window.history.replaceState({}, '', window.location.pathname + (window.location.hash || ''))
-  }, [handleStartCoaching])
-
   const handleEndCall = useCallback(async () => {
     addLog("[END] Rebuilding session termination flow...")
     
@@ -1439,6 +1427,21 @@ export function SalesCoachOverlay() {
     handleStartCoaching(mode)
   }, [pendingMode, restartTriggered, restartComplete, handleStartCoaching])
 
+  // When opened from extension via ?start=inroom, auto-start In-Room on the website (bypass extension mic limits)
+  // MOVED HERE so it can access tryStartSession (defined above)
+  useEffect(() => {
+    if (typeof window === 'undefined' || didAutoStartInRoomRef.current) return
+    // Removed inExtension check to ensure it runs on website even if extension is detected
+    const params = new URLSearchParams(window.location.search)
+    if (params.get('start') !== 'inroom') return
+    didAutoStartInRoomRef.current = true
+    
+    // CHANGED: Use tryStartSession to trigger loading overlay sequence
+    tryStartSession('diarized')
+    
+    window.history.replaceState({}, '', window.location.pathname + (window.location.hash || ''))
+  }, [tryStartSession])
+
   const formatTime = (s: number) => {
     const m = Math.floor(s / 60)
     const sec = s % 60
@@ -1503,7 +1506,13 @@ export function SalesCoachOverlay() {
                 </button>
                 <button
                   type="button"
-                  onClick={() => tryStartSession('diarized')}
+                  onClick={() => {
+                    if (onInRoomStart) {
+                      onInRoomStart()
+                    } else {
+                      tryStartSession('diarized')
+                    }
+                  }}
                   disabled={isRestarting}
                   className="w-full py-3.5 rounded-xl bg-transparent border border-[#3f3f46] hover:bg-[#2c2c2e] text-[#ffffff] text-[13px] font-bold tracking-wide transition-all disabled:opacity-50 disabled:cursor-not-allowed"
                 >
