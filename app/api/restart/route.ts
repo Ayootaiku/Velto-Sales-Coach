@@ -1,6 +1,13 @@
 import { NextRequest, NextResponse } from "next/server";
 
 export async function POST(req: NextRequest) {
+  // Allow extension origins
+  const headers = {
+    "Access-Control-Allow-Origin": "*",
+    "Access-Control-Allow-Methods": "POST",
+    "Access-Control-Allow-Headers": "Content-Type",
+  }
+
   try {
     const { secret } = await req.json();
 
@@ -8,13 +15,13 @@ export async function POST(req: NextRequest) {
     const expectedSecret = process.env.RESTART_SECRET || 'velto-restart-secret-2024';
     if (secret !== expectedSecret) {
       console.error(`[Restart API] Unauthorized. Expected: ${expectedSecret}, Got: ${secret}`);
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401, headers });
     }
 
     const token = process.env.RAILWAY_API_TOKEN;
     if (!token) {
       console.error("[Restart API] Missing RAILWAY_API_TOKEN");
-      return NextResponse.json({ error: "Server configuration error" }, { status: 500 });
+      return NextResponse.json({ error: "Server configuration error" }, { status: 500, headers });
     }
 
     // Step 1: Get the latest active deployment ID
@@ -51,7 +58,7 @@ export async function POST(req: NextRequest) {
 
     if (!deploymentId) {
       console.error("[Restart API] No active deployment found");
-      return NextResponse.json({ error: "No active deployment found" }, { status: 404 });
+      return NextResponse.json({ error: "No active deployment found" }, { status: 404, headers });
     }
 
     // Step 2: Restart it (no rebuild!)
@@ -74,12 +81,22 @@ export async function POST(req: NextRequest) {
 
     if (restartData.errors) {
       console.error("Railway GraphQL Error:", restartData.errors);
-      return NextResponse.json({ error: restartData.errors }, { status: 500 });
+      return NextResponse.json({ error: restartData.errors }, { status: 500, headers });
     }
 
-    return NextResponse.json({ success: true });
+    return NextResponse.json({ success: true }, { headers });
   } catch (error) {
     console.error("Restart API Error:", error);
-    return NextResponse.json({ error: "Internal Server Error" }, { status: 500 });
+    return NextResponse.json({ error: "Internal Server Error" }, { status: 500, headers });
   }
+}
+
+export async function OPTIONS() {
+  return new NextResponse(null, {
+    headers: {
+      "Access-Control-Allow-Origin": "*",
+      "Access-Control-Allow-Methods": "POST",
+      "Access-Control-Allow-Headers": "Content-Type",
+    },
+  })
 }
