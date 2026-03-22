@@ -62,9 +62,10 @@ export function RealtimeCoachOverlay() {
         setCoaching(finalCoaching);
         setIsDraft(false);
         
-        // Restart STT streams after AI responds to ensure fresh connection
-        console.log('[Coach] AI responded, restarting STT streams...');
-        await restartSTTStreams();
+        // DO NOT restart STT streams here. It breaks the audio context for the current session
+        // and causes subsequent sessions to fail if they start after an AI response.
+        // The streams are already continuous and don't need restarting after every response.
+        console.log('[Coach] AI responded successfully');
       }
     });
   });
