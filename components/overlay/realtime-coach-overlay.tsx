@@ -190,8 +190,10 @@ export function RealtimeCoachOverlay() {
   const endCall = useCallback(async () => {
     setIsActive(false);
     microphone.stopListening();
-    prospectSTT.stopStream();
-    salespersonSTT.stopStream();
+    
+    // Force kill context and don't keep tracks to ensure clean slate for next call
+    await prospectSTT.stopStream(false, true);
+    await salespersonSTT.stopStream(false, true);
     
     if (callId) {
       const summary = await generateSummary(callId);
