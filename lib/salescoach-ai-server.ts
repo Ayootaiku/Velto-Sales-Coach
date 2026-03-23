@@ -139,6 +139,14 @@ ${settings?.callType ? `CALL TYPE: ${settings.callType}` : ''}
 ${settings?.primaryObjective ? `PRIMARY OBJECTIVE: ${settings.primaryObjective}` : ''}
 ${settings?.keyDifferentiators ? `KEY DIFFERENTIATORS: ${settings.keyDifferentiators}` : ''}
 ${styleInstruction}
+
+CRITICAL INSTRUCTION FOR 'SAY_NEXT':
+1. Must be grammatically complete sentences. No fragments.
+2. Must sound like natural spoken English.
+3. Must flow naturally at a normal speaking pace.
+4. NO two-word fragments or half-finished thoughts.
+5. Write it exactly as the salesperson should speak it verbatim.
+
 JSON: {speaker, stage, objection_type, say_next, insight, confidence}`;
 
     // Prepare the request payload
@@ -302,6 +310,14 @@ ${settings?.keyDifferentiators ? `KEY DIFFERENTIATORS: ${settings.keyDifferentia
 ${styleInstruction}
 IMPORTANT: Your 'INSIGHT' must be at least 25 words or two full sentences explaining the tactical edge of your advice.
 DO NOT wrap your response in quotes.
+
+CRITICAL INSTRUCTION FOR 'SAY_NEXT':
+1. Must be grammatically complete sentences. No fragments.
+2. Must sound like natural spoken English.
+3. Must flow naturally at a normal speaking pace.
+4. NO two-word fragments or half-finished thoughts.
+5. Write it exactly as the salesperson should speak it verbatim.
+
 FORMAT YOUR RESPONSE EXACTLY LIKE THIS (include the labels):
 STAGE: [Stage Name]
 INSIGHT: [A detailed strategic reasoning explaining WHY this response is the most tactical choice here. Focus on psychological impact. At least 2 sentences.]
