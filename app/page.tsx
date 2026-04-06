@@ -10,13 +10,12 @@ export default function Page() {
   // unless manually overridden, ensuring 'Trace' and STT performance matches the extension.
   useEffect(() => {
     const isLocal = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1'
-    const prodUrl = "https://velto-sales-coach-production.up.railway.app"
-    const prodWss = "wss://velto-sales-coach-production.up.railway.app"
-    
     if (!isLocal) {
-      setApiBaseUrl(prodUrl)
-      setWssBaseUrl(prodWss)
-      console.log(`[SYSTEM] Production Parity Enabled (API: ${prodUrl}, WSS: ${prodWss})`)
+      const origin = window.location.origin
+      const wss = origin.replace(/^https/, 'wss')
+      setApiBaseUrl(origin)
+      setWssBaseUrl(wss)
+      console.log(`[SYSTEM] Production parity (same host as page) API: ${origin}, WSS: ${wss}`)
     } else {
       console.log(`[SYSTEM] Local Development Mode Detected. Using local API routes and env variables.`)
     }

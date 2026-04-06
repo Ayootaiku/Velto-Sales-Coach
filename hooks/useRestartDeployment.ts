@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { getApiOrigin } from "@/lib/salescoach-ai";
 
 export function useRestartDeployment() {
   const [isRestarting, setIsRestarting] = useState(false);
@@ -6,10 +7,10 @@ export function useRestartDeployment() {
   const restartDeployment = async () => {
     setIsRestarting(true);
     try {
-      const isExtension = typeof chrome !== "undefined" && !!chrome.runtime?.id;
-      const baseUrl = isExtension ? "https://velto-sales-coach-production.up.railway.app" : "";
+      const origin = getApiOrigin().replace(/\/$/, "");
+      const url = origin ? `${origin}/api/restart` : "/api/restart";
 
-      const res = await fetch(`${baseUrl}/api/restart`, {
+      const res = await fetch(url, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({

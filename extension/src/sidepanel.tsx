@@ -15,11 +15,15 @@ function SidePanelApp() {
   const { restartDeployment } = useRestartDeployment();
 
   const handleInRoomStart = async () => {
+    if (!API_BASE_URL) {
+      console.error('[Velto] Set VITE_PRODUCTION_ORIGIN in repo root .env.local to your Render https URL, then run pnpm ext:build.');
+      return;
+    }
     // 1. Fire restart immediately (don't wait)
     restartDeployment().catch(e => console.error("Background restart failed:", e));
     
     // 2. Open website immediately
-    const websiteUrl = 'https://velto-sales-coach-production.up.railway.app'
+    const websiteUrl = API_BASE_URL
     if (typeof chrome !== 'undefined' && chrome.tabs) {
       chrome.tabs.create({ url: `${websiteUrl}?start=inroom` })
     } else {

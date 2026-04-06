@@ -1,87 +1,50 @@
 import { NextRequest, NextResponse } from "next/server";
 
 export async function POST(req: NextRequest) {
-  // Allow extension origins
   const headers = {
     "Access-Control-Allow-Origin": "*",
     "Access-Control-Allow-Methods": "POST",
     "Access-Control-Allow-Headers": "Content-Type",
-  }
+  };
 
   try {
     const { secret } = await req.json();
 
-    // Guard against unauthorized calls
-    const expectedSecret = process.env.RESTART_SECRET || 'velto-restart-secret-2024';
+    const expectedSecret = process.env.RESTART_SECRET || "velto-restart-secret-2024";
     if (secret !== expectedSecret) {
       console.error(`[Restart API] Unauthorized. Expected: ${expectedSecret}, Got: ${secret}`);
       return NextResponse.json({ error: "Unauthorized" }, { status: 401, headers });
     }
 
-    const token = process.env.RAILWAY_API_TOKEN;
-    if (!token) {
-      console.error("[Restart API] Missing RAILWAY_API_TOKEN");
-      return NextResponse.json({ error: "Server configuration error" }, { status: 500, headers });
+    const apiKey = process.env.RENDER_API_KEY;
+    const serviceId = process.env.RENDER_SERVICE_ID;
+    if (!apiKey || !serviceId) {
+      console.error("[Restart API] Missing RENDER_API_KEY or RENDER_SERVICE_ID");
+      return NextResponse.json(
+        { error: "Server configuration error" },
+        { status: 500, headers }
+      );
     }
 
-    // Step 1: Get the latest active deployment ID
-    const getDeploymentQuery = `
-      query {
-        deployments(
-          first: 1,
-          input: {
-            serviceId: "${process.env.RAILWAY_SERVICE_ID}",
-            environmentId: "${process.env.RAILWAY_ENVIRONMENT_ID}"
-          }
-        ) {
-          edges {
-            node {
-              id
-              status
-            }
-          }
-        }
+    const res = await fetch(
+      `https://api.render.com/v1/services/${serviceId}/restart`,
+      {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${apiKey}`,
+          Accept: "application/json",
+          "Content-Type": "application/json",
+        },
       }
-    `;
+    );
 
-    const deploymentRes = await fetch("https://backboard.railway.app/graphql/v2", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${token}`,
-      },
-      body: JSON.stringify({ query: getDeploymentQuery }),
-    });
-
-    const deploymentData = await deploymentRes.json();
-    const deploymentId = deploymentData.data?.deployments?.edges?.[0]?.node?.id;
-
-    if (!deploymentId) {
-      console.error("[Restart API] No active deployment found");
-      return NextResponse.json({ error: "No active deployment found" }, { status: 404, headers });
-    }
-
-    // Step 2: Restart it (no rebuild!)
-    const restartMutation = `
-      mutation {
-        deploymentRestart(id: "${deploymentId}")
-      }
-    `;
-
-    const restartRes = await fetch("https://backboard.railway.app/graphql/v2", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${token}`,
-      },
-      body: JSON.stringify({ query: restartMutation }),
-    });
-
-    const restartData = await restartRes.json();
-
-    if (restartData.errors) {
-      console.error("Railway GraphQL Error:", restartData.errors);
-      return NextResponse.json({ error: restartData.errors }, { status: 500, headers });
+    if (!res.ok) {
+      const text = await res.text();
+      console.error("[Restart API] Render error:", res.status, text);
+      return NextResponse.json(
+        { error: "Render restart failed", detail: text },
+        { status: res.status >= 500 ? 502 : res.status, headers }
+      );
     }
 
     return NextResponse.json({ success: true }, { headers });
@@ -98,5 +61,5 @@ export async function OPTIONS() {
       "Access-Control-Allow-Methods": "POST",
       "Access-Control-Allow-Headers": "Content-Type",
     },
-  })
+  });
 }

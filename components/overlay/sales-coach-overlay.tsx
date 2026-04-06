@@ -32,7 +32,7 @@ import {
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { Button } from "@/components/ui/button"
 import { Slider } from "@/components/ui/slider"
-import { generateLiveCoaching, generatePostCallSummary, getApiUrl, type TranscriptTurn } from "@/lib/salescoach-ai"
+import { generateLiveCoaching, generatePostCallSummary, getApiOrigin, getApiUrl, type TranscriptTurn } from "@/lib/salescoach-ai"
 import { processTranscriptUltraFast, type TranscriptTurn as CopilotTurn } from "@/lib/salescoach-copilot"
 import { createTurnManager } from "@/lib/turn-manager"
 import { useRestartDeployment } from "@/hooks/useRestartDeployment"
@@ -1278,23 +1278,26 @@ export function SalesCoachOverlay({ onInRoomStart }: { onInRoomStart?: () => voi
     setSalespersonTag(null)
     setManualSpeaker('salesperson')
     
-    // 6. Fire RESTART
+    // 6. Fire RESTART (Render API on server; body must match RESTART_SECRET)
     try {
-      console.log('[Coach] Triggering Railway deployment restart...');
-      const response = await fetch('/api/restart', {
-        method: 'POST',
-        headers: {
-          'X-Restart-Secret': process.env.NEXT_PUBLIC_RESTART_SECRET || 'velto-restart-secret-2024'
-        }
-      });
-      const data = await response.json();
-      if (data.triggered) {
-        console.log('[Coach] Railway deployment restart triggered successfully');
+      const origin = getApiOrigin().replace(/\/$/, "")
+      const url = origin ? `${origin}/api/restart` : "/api/restart"
+      console.log("[Coach] Triggering deployment restart...")
+      const response = await fetch(url, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          secret: process.env.NEXT_PUBLIC_RESTART_SECRET || "velto-restart-secret-2024",
+        }),
+      })
+      const data = await response.json()
+      if (data.success) {
+        console.log("[Coach] Deployment restart triggered successfully")
       } else {
-        console.error('[Coach] Failed to trigger Railway deployment restart:', data.error || data.reason);
+        console.error("[Coach] Failed to trigger deployment restart:", data.error || data.reason)
       }
     } catch (error) {
-      console.error('[Coach] Error triggering Railway deployment restart:', error);
+      console.error("[Coach] Error triggering deployment restart:", error)
     }
   }, [microphone, speechRecognition, salespersonStream, prospectStream, addLog])
 
@@ -1392,10 +1395,10 @@ export function SalesCoachOverlay({ onInRoomStart }: { onInRoomStart?: () => voi
     setPendingMode(null)
 
     // If a restart is strictly required and still in progress, we POLL until healthy.
-    // This is necessary because startStream will fail immediately if Railway isn't up.
+    // This is necessary because startStream will fail immediately if the host isn't up.
     if (restartTriggered && !restartComplete) {
       setRestartLoading(true)
-      console.warn("[START] Railway restart in progress - waiting for health check...")
+      console.warn("[START] Deployment restart in progress - waiting for health check...")
       let attempts = 0
       while (attempts < 30) { // Max 60s
         try {
@@ -1416,7 +1419,17 @@ export function SalesCoachOverlay({ onInRoomStart }: { onInRoomStart?: () => voi
 
     const inExtension = typeof chrome !== 'undefined' && !!chrome.runtime?.id
     if (mode === 'diarized' && inExtension) {
-      const websiteUrl = 'https://velto-sales-coach-production.up.railway.app'
+      const websiteUrl =
+        getApiOrigin() ||
+        (typeof window !== 'undefined' &&
+        window.location.hostname !== 'localhost' &&
+        window.location.hostname !== '127.0.0.1'
+          ? window.location.origin
+          : '')
+      if (!websiteUrl) {
+        console.error('[Coach] Set VITE_PRODUCTION_ORIGIN and rebuild extension, or open the site from Render.')
+        return
+      }
       if (chrome.tabs) {
         chrome.tabs.create({ url: `${websiteUrl}?start=inroom` })
       } else {

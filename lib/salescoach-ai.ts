@@ -5,6 +5,10 @@
 
 let _apiBaseUrl = '';
 export function setApiBaseUrl(url: string) { _apiBaseUrl = url; }
+/** Empty string until setApiBaseUrl (e.g. page or extension entry). Used for absolute links and /api/restart in the extension. */
+export function getApiOrigin(): string {
+  return _apiBaseUrl;
+}
 export function getApiUrl(path: string) { return _apiBaseUrl ? `${_apiBaseUrl}${path}` : path; }
 function apiUrl(path: string) { return getApiUrl(path); }
 

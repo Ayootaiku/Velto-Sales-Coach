@@ -5,7 +5,8 @@ import path from 'path';
 const root = path.resolve(__dirname);
 
 export default defineConfig(({ mode }) => {
-  const env = loadEnv(mode, root, '');
+  const envRoot = path.resolve(__dirname, '..');
+  const env = loadEnv(mode, envRoot, '');
 
   return {
     root,
@@ -55,7 +56,15 @@ export default defineConfig(({ mode }) => {
       'process.env.NODE_ENV': JSON.stringify('production'),
       'process.env.NEXT_PUBLIC_RESTART_SECRET': JSON.stringify(env.NEXT_PUBLIC_RESTART_SECRET || env.VITE_RESTART_SECRET || ''),
       'process.env': '{}',
-      'import.meta.env.VITE_RAILWAY_WSS': JSON.stringify('wss://velto-sales-coach-production.up.railway.app'),
+      'import.meta.env.VITE_PRODUCTION_ORIGIN': JSON.stringify(
+        env.VITE_PRODUCTION_ORIGIN || env.NEXT_PUBLIC_PRODUCTION_ORIGIN || ''
+      ),
+      'import.meta.env.VITE_CLOUD_WSS': JSON.stringify(
+        (() => {
+          const o = env.VITE_PRODUCTION_ORIGIN || env.NEXT_PUBLIC_PRODUCTION_ORIGIN || '';
+          return o ? o.replace(/^https/, 'wss') : '';
+        })()
+      ),
       'import.meta.env.VITE_RESTART_SECRET': JSON.stringify(env.VITE_RESTART_SECRET || ''),
     },
   };

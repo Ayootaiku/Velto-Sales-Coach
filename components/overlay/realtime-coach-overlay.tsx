@@ -16,6 +16,7 @@ import {
   type CoachingResponse
 } from "@/lib/salescoach-copilot-client"
 import { createCall, updateCallStatus } from "@/lib/mcp-client"
+import { getApiOrigin } from "@/lib/salescoach-ai"
 
 // Minimal UI - Only what the salesperson needs
 export function RealtimeCoachOverlay() {
@@ -205,23 +206,25 @@ export function RealtimeCoachOverlay() {
     setCoaching(null);
     setIsProcessingAI(false);
 
-    // Trigger Railway deployment restart
     try {
-      console.log('[Coach] Triggering Railway deployment restart...');
-      const response = await fetch('/api/restart', {
-        method: 'POST',
-        headers: {
-          'X-Restart-Secret': process.env.NEXT_PUBLIC_RESTART_SECRET || 'velto-restart-secret-2024'
-        }
-      });
-      const data = await response.json();
-      if (data.triggered) {
-        console.log('[Coach] Railway deployment restart triggered successfully');
+      const origin = getApiOrigin().replace(/\/$/, "")
+      const url = origin ? `${origin}/api/restart` : "/api/restart"
+      console.log("[Coach] Triggering deployment restart...")
+      const response = await fetch(url, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          secret: process.env.NEXT_PUBLIC_RESTART_SECRET || "velto-restart-secret-2024",
+        }),
+      })
+      const data = await response.json()
+      if (data.success) {
+        console.log("[Coach] Deployment restart triggered successfully")
       } else {
-        console.error('[Coach] Failed to trigger Railway deployment restart:', data.error || data.reason);
+        console.error("[Coach] Failed to trigger deployment restart:", data.error || data.reason)
       }
     } catch (error) {
-      console.error('[Coach] Error triggering Railway deployment restart:', error);
+      console.error("[Coach] Error triggering deployment restart:", error)
     }
   }, [callId, callTime, microphone, prospectSTT, salespersonSTT]);
 

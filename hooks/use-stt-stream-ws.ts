@@ -155,13 +155,19 @@ export function useSTTStream(
   ): Promise<WebSocket> => {
     const params = `?session=${sessionId}&speaker=${speaker}${diarize ? '&diarize=true' : ''}`
 
-    // Production/Manifest standard: prioritize cloud production server (Railway) to ensure website matches extension performance
-    const inExtension = typeof chrome !== 'undefined' && !!chrome.runtime?.id
-    const railwayWss = (typeof import.meta !== 'undefined' && (import.meta as { env?: { VITE_RAILWAY_WSS?: string } }).env?.VITE_RAILWAY_WSS) || ''
-    const railwayFallback = 'wss://velto-sales-coach-production.up.railway.app'
+    // Extension build may set VITE_CLOUD_WSS; web sets _wssBaseUrl from page origin (Render, etc.)
+    const viteCloudWss =
+      (typeof import.meta !== 'undefined' &&
+        (import.meta as { env?: { VITE_CLOUD_WSS?: string } }).env?.VITE_CLOUD_WSS) ||
+      ''
 
-    // TRACE-A Log enhancement for visibility: Universal fallback to production just like manifest context
-    const cloudBase = _wssBaseUrl || railwayWss || railwayFallback
+    const cloudBase = _wssBaseUrl || viteCloudWss
+    const inExtension = typeof chrome !== 'undefined' && !!chrome.runtime?.id
+    if (inExtension && !cloudBase) {
+      throw new Error(
+        '[WS STT] Extension: set VITE_PRODUCTION_ORIGIN in repo root .env.local to your Render https URL, then pnpm ext:build.'
+      )
+    }
 
     if (cloudBase) {
       console.log(`[TRACE-A] ${speaker} - Using production system (Cloud): ${cloudBase}`)
